@@ -97,6 +97,10 @@ models:
     # Thinking left ON — reasoning helps with logic. Code also drafts well, so
     # MTP acceptance (and speed) is highest on this workload. Same no-cap rule:
     # no --predict, omit max_tokens in requests.
+    #
+    # 128K context (-c 131072) to fit large files / whole repos. The KV cache
+    # for this is large; if you hit memory pressure, turn flash attention on
+    # (-fa on) to shrink it, or drop -c.
     cmd: |
       llama-server
       -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
@@ -105,7 +109,7 @@ models:
       --spec-draft-n-max 6
       -ngl 999
       -fa off
-      -c 16384
+      -c 131072
       --temp 0.2
       --top-k 40
       --top-p 0.95
