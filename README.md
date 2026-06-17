@@ -117,6 +117,59 @@ The JSON response includes a `timings` block. With MTP it also reports
 `draft_n` and `draft_n_accepted` — the acceptance count proves speculation is
 working.
 
+### Settings preset: summarization (deterministic)
+
+Summaries should be **faithful and reproducible**, not creative — so turn off
+sampling randomness with greedy decoding (`temperature: 0`) and keep the other
+samplers neutral:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role": "system", "content": "Summarize the user text faithfully and concisely. Do not add information that is not in the source."},
+      {"role": "user", "content": "<text to summarize>"}
+    ],
+    "temperature": 0,
+    "top_p": 1.0,
+    "top_k": 1,
+    "repeat_penalty": 1.0,
+    "max_tokens": 512,
+    "seed": 42
+  }'
+```
+
+| Setting | Value | Why for summarization |
+|---|---|---|
+| `temperature` | `0` | Greedy decoding — always picks the most probable token. Same input → same summary. |
+| `top_p` | `1.0` | No nucleus truncation needed; `temperature: 0` already makes decoding deterministic. |
+| `top_k` | `1` | Reinforces greedy selection. |
+| `repeat_penalty` | `1.0` | Neutral. Repetition penalties can distort faithful restatement of the source. |
+| `max_tokens` | `512` | Caps summary length. Raise for long-document digests. |
+| `seed` | `42` | Fixed seed → fully reproducible runs. |
+
+Source text for summarization is usually long, so launch the server with a
+larger context (and remember `prompt + max_tokens` must fit inside `-c`):
+
+```bash
+llama-server -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
+  --model-draft ./models/mtp-gemma-4-E4B-it.gguf \
+  --spec-type draft-mtp --spec-draft-n-max 4 \
+  -ngl 999 -fa off -c 16384 \
+  --host 127.0.0.1 --port 8080
+```
+
+> **Bonus:** `temperature: 0` also **maximizes MTP draft acceptance** — greedy
+> decoding makes the drafter's guesses easy to verify, so deterministic
+> summarization is among the fastest workloads here.
+
+> **Thinking:** Gemma 4 has reasoning enabled by default, which can consume your
+> `max_tokens` before the summary appears (see Troubleshooting). For summaries,
+> raise `max_tokens` or disable thinking in the request — e.g. pass
+> `"chat_template_kwargs": {"enable_thinking": false}` if your build's chat
+> template supports it.
+
 ---
 
 ## 4. Benchmark MTP vs baseline
