@@ -126,7 +126,9 @@ with the other samplers neutral.
 
 These deterministic sampling defaults are **baked into `llama-swap.yaml`**
 (`--temp 0 --top-k 1 --top-p 1.0 --repeat-penalty 1.0`), so when you go through
-llama-swap a request only needs the model, your text, and a token budget:
+llama-swap a request only needs the model and your text. **Omit `max_tokens`** —
+with thinking on, reasoning tokens count against it, so a small cap truncates the
+summary; left unset, the server generates until done:
 
 ```bash
 curl -s http://127.0.0.1:8080/v1/chat/completions \
@@ -136,8 +138,7 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
     "messages": [
       {"role": "system", "content": "Summarize the user text faithfully and concisely. Do not add information that is not in the source."},
       {"role": "user", "content": "<text to summarize>"}
-    ],
-    "max_tokens": 1024
+    ]
   }'
 ```
 
@@ -156,7 +157,6 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
     "top_p": 1.0,
     "top_k": 1,
     "repeat_penalty": 1.0,
-    "max_tokens": 1024,
     "seed": 42
   }'
 ```
@@ -167,11 +167,12 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
 | `top_p` | `1.0` | No nucleus truncation needed; `temperature: 0` already makes decoding deterministic. |
 | `top_k` | `1` | Reinforces greedy selection. |
 | `repeat_penalty` | `1.0` | Neutral. Repetition penalties can distort faithful restatement of the source. |
-| `max_tokens` | `1024` | Caps summary length. Raise for long-document digests. |
+| `max_tokens` | *(omit)* | Don't cap it. With thinking on, a cap counts reasoning + summary together and truncates output. Set one only as an upper bound well above the expected summary (e.g. `4096`). |
 | `seed` | `42` | Fixed seed → fully reproducible runs. |
 
 Source text for summarization is usually long, so launch the server with a
-larger context (and remember `prompt + max_tokens` must fit inside `-c`):
+larger context (and remember the prompt plus the full generation must fit
+inside `-c`):
 
 ```bash
 llama-server -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
@@ -187,9 +188,11 @@ llama-server -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
 
 > **Thinking (keep it on):** Gemma 4's reasoning is enabled by default and we
 > **leave it enabled** for summarization — it produces more faithful summaries.
-> The trade-off is that thinking shares the token budget, so keep `max_tokens`
-> generous (≥ 1024) and the context (`-c 16384`) large enough that the prompt
-> plus reasoning plus summary all fit. If you ever need raw speed over quality,
+> The trade-off: reasoning tokens share the generation budget, so **don't set a
+> tight `max_tokens`** — a real summary easily runs 1.5–2k+ tokens (reasoning +
+> output) and a low cap truncates it with `finish_reason: "length"`. Leave
+> `max_tokens` unset (no cap) and keep the context (`-c 16384`) large enough for
+> prompt + reasoning + summary. If you ever need raw speed over quality,
 > disabling thinking is possible (e.g. `"chat_template_kwargs":
 > {"enable_thinking": false}` if your build's chat template supports it), but
 > that's not the default path here.
@@ -206,10 +209,14 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gemma-4-e4b-generic",
-    "messages": [{"role": "user", "content": "Write a haiku about caches."}],
-    "max_tokens": 512
+    "messages": [{"role": "user", "content": "Write a haiku about caches."}]
   }'
 ```
+
+> Same as summarization: **leave `max_tokens` unset.** A cap silently truncates
+> the response (`finish_reason: "length"`); without one, the only ceiling is the
+> context window (`-c`), and overflowing that fails loudly with an
+> `exceeds the available context size` error instead of quietly cutting output.
 
 Switching between `gemma-4-e4b-summary` (deterministic, the default — also
 reachable as `gemma-4-e4b`) and `gemma-4-e4b-generic` just by changing the

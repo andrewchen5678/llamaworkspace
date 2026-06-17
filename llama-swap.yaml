@@ -37,8 +37,15 @@ models:
     # Deterministic sampling defaults (--temp 0 / --top-k 1 / --top-p 1.0 /
     # --repeat-penalty 1.0) baked in so every request is faithful and
     # reproducible without restating them. Clients can still override per call.
-    # Gemma 4 thinking is left ON — reasoning improves summary quality; keep a
-    # generous max_tokens (≥ 1024) since thinking shares the token budget.
+    # Gemma 4 thinking is left ON — reasoning improves summary quality.
+    #
+    # Note: no generation cap is set on purpose. max_tokens (per-request) and
+    # --predict (server-side) both SILENTLY truncate output once hit
+    # (finish_reason: "length") — bad for summaries. Left uncapped, the only
+    # ceiling is the context window (-c); exceeding it fails loudly with an
+    # "exceeds the available context size" error instead of quietly cutting the
+    # summary. Prefer that. So: don't add --predict, and omit max_tokens in
+    # requests.
     # ${PORT} is assigned by llama-swap, which proxies to it.
     cmd: |
       llama-server
