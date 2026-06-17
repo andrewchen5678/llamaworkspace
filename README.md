@@ -119,9 +119,30 @@ working.
 
 ### Settings preset: summarization (deterministic)
 
-Summaries should be **faithful and reproducible**, not creative — so turn off
-sampling randomness with greedy decoding (`temperature: 0`) and keep the other
-samplers neutral:
+**Summarization is the primary use case here, and Gemma 4's thinking is left
+enabled** — the reasoning pass improves summary faithfulness. Summaries should
+also be **reproducible**, not creative, so decoding is greedy (`temperature: 0`)
+with the other samplers neutral.
+
+These deterministic sampling defaults are **baked into `llama-swap.yaml`**
+(`--temp 0 --top-k 1 --top-p 1.0 --repeat-penalty 1.0`), so when you go through
+llama-swap a request only needs the model, your text, and a token budget:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemma-4-e4b",
+    "messages": [
+      {"role": "system", "content": "Summarize the user text faithfully and concisely. Do not add information that is not in the source."},
+      {"role": "user", "content": "<text to summarize>"}
+    ],
+    "max_tokens": 1024
+  }'
+```
+
+Running `llama-server` directly (no llama-swap), or to override the defaults,
+set them explicitly per request:
 
 ```bash
 curl -s http://127.0.0.1:8080/v1/chat/completions \
@@ -135,7 +156,7 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
     "top_p": 1.0,
     "top_k": 1,
     "repeat_penalty": 1.0,
-    "max_tokens": 512,
+    "max_tokens": 1024,
     "seed": 42
   }'
 ```
@@ -146,7 +167,7 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
 | `top_p` | `1.0` | No nucleus truncation needed; `temperature: 0` already makes decoding deterministic. |
 | `top_k` | `1` | Reinforces greedy selection. |
 | `repeat_penalty` | `1.0` | Neutral. Repetition penalties can distort faithful restatement of the source. |
-| `max_tokens` | `512` | Caps summary length. Raise for long-document digests. |
+| `max_tokens` | `1024` | Caps summary length. Raise for long-document digests. |
 | `seed` | `42` | Fixed seed → fully reproducible runs. |
 
 Source text for summarization is usually long, so launch the server with a
@@ -164,11 +185,86 @@ llama-server -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
 > decoding makes the drafter's guesses easy to verify, so deterministic
 > summarization is among the fastest workloads here.
 
-> **Thinking:** Gemma 4 has reasoning enabled by default, which can consume your
-> `max_tokens` before the summary appears (see Troubleshooting). For summaries,
-> raise `max_tokens` or disable thinking in the request — e.g. pass
-> `"chat_template_kwargs": {"enable_thinking": false}` if your build's chat
-> template supports it.
+> **Thinking (keep it on):** Gemma 4's reasoning is enabled by default and we
+> **leave it enabled** for summarization — it produces more faithful summaries.
+> The trade-off is that thinking shares the token budget, so keep `max_tokens`
+> generous (≥ 1024) and the context (`-c 16384`) large enough that the prompt
+> plus reasoning plus summary all fit. If you ever need raw speed over quality,
+> disabling thinking is possible (e.g. `"chat_template_kwargs":
+> {"enable_thinking": false}` if your build's chat template supports it), but
+> that's not the default path here.
+
+### Settings preset: generic use
+
+For general-purpose chat / generation (not summarization), `llama-swap.yaml`
+defines a second model, **`gemma-4-e4b-generic`**, with Gemma's recommended
+balanced sampling (`--temp 1.0 --top-k 64 --top-p 0.95 --min-p 0.0`) baked in.
+Same weights and MTP drafter — only the sampling defaults differ:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemma-4-e4b-generic",
+    "messages": [{"role": "user", "content": "Write a haiku about caches."}],
+    "max_tokens": 512
+  }'
+```
+
+Switching between `gemma-4-e4b-summary` (deterministic, the default — also
+reachable as `gemma-4-e4b`) and `gemma-4-e4b-generic` just by changing the
+`model` field makes llama-swap stop one and start the other, since only one
+fits the configured footprint.
+
+---
+
+## Auto-unload when idle (llama-swap)
+
+`llama-server` keeps the model resident until the process exits — it has no
+built-in idle unload. To free GPU/RAM automatically, this folder ships a
+[`llama-swap`](https://github.com/mostlygeek/llama-swap) setup. llama-swap is a
+proxy that starts `llama-server` on demand and shuts it down after a configurable
+idle `ttl`, reloading transparently on the next request.
+
+**Install** (no Homebrew formula — drop the prebuilt binary on your `PATH`):
+
+```bash
+# Apple Silicon (arm64). Pick the latest release tag from the releases page.
+curl -sL https://github.com/mostlygeek/llama-swap/releases/latest/download/llama-swap_darwin_arm64.tar.gz \
+  | tar xz -C ~/.local/bin llama-swap   # ensure ~/.local/bin is on your PATH
+```
+
+**Run** (from the project root, so the relative model paths resolve):
+
+```bash
+./serve-llama-swap.sh                 # listens on 127.0.0.1:8080
+./serve-llama-swap.sh 127.0.0.1:9090  # custom address
+```
+
+The config (`llama-swap.yaml`) defines two models on the same weights, with a
+5-minute idle `ttl`:
+
+| `model` name | Sampling | Use |
+|---|---|---|
+| `gemma-4-e4b-summary` (alias `gemma-4-e4b`) | `temp 0, top-k 1, top-p 1.0` | Deterministic summarization (default) |
+| `gemma-4-e4b-generic` | `temp 1.0, top-k 64, top-p 0.95` | General chat / generation |
+
+**Send requests** to the listen address and name the model in the body — that's
+how llama-swap routes (and decides which to load):
+
+```bash
+curl -s http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gemma-4-e4b-generic","messages":[{"role":"user","content":"hi"}],"max_tokens":256}'
+```
+
+**Web UI:** don't open `http://localhost:8080/` — that bundled page probes
+`/props` with `autoload=false` and shows *"Server unavailable / 404"* until a
+model is running. Instead open the model's own llama.cpp UI through the
+`/upstream/<model>/` route, which loads it on demand:
+
+- <http://localhost:8080/upstream/gemma-4-e4b-summary/>
+- <http://localhost:8080/upstream/gemma-4-e4b-generic/>
 
 ---
 
@@ -223,6 +319,8 @@ draft acceptance = 0.355 (116 accepted / 327 generated), mean acceptance length 
 | Empty `content` in chat response | Gemma 4 has thinking enabled; reasoning may occupy the token budget. Raise `max_tokens` or disable thinking in the request. |
 | `failed to measure draft model memory` warning at startup | Harmless — the drafter still loads and works. |
 | Want CPU-only | Replace `-ngl 999` with `-ngl 0`. |
+| llama-swap web UI at `/` shows *"Server unavailable / 404"* | The bundled UI probes `/props` with `autoload=false`, which 404s when no model is loaded. Open `http://localhost:8080/upstream/<model>/` instead (e.g. `gemma-4-e4b-generic`) — it loads the model on demand. The `/v1/*` API works regardless. |
+| llama-swap: `404` routing a request | The `model` field must match a configured name (`gemma-4-e4b-summary`, `gemma-4-e4b-generic`, or alias `gemma-4-e4b`). A missing/unknown `model` 404s. |
 
 ---
 
@@ -231,5 +329,7 @@ draft acceptance = 0.355 (116 accepted / 327 generated), mean acceptance length 
 | File | Purpose |
 |---|---|
 | `download-gemma4-e4b-mtp.sh` | Downloads target model + MTP drafter |
+| `llama-swap.yaml` | llama-swap config: summary + generic models, idle auto-unload |
+| `serve-llama-swap.sh` | Launches llama-swap in front of llama-server |
 | `models/` | Downloaded GGUF files |
 | `README.md` | This document |

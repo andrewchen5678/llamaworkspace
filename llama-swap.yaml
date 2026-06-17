@@ -1,0 +1,80 @@
+# llama-swap configuration
+#
+# llama-swap is a proxy that starts llama-server on demand and shuts it down
+# after `ttl` seconds of inactivity — freeing GPU/RAM when idle, then reloading
+# transparently on the next request.
+#
+# Run it from the project root (paths below are relative to this directory):
+#   cd /Users/it3/codes/andrew/llamaworkspace
+#   llama-swap -config ./llama-swap.yaml -listen 127.0.0.1:8080
+# Add -watch-config to hot-reload this file on save.
+#
+# Then send requests to http://127.0.0.1:8080 exactly as before, but the JSON
+# body must name the model so llama-swap knows which one to route to:
+#   "model": "gemma-4-e4b-summary"   # deterministic summarization (primary)
+#   "model": "gemma-4-e4b-generic"   # general-purpose chat / generation
+#
+# Both run the SAME weights with the SAME MTP drafter — they differ only in
+# sampling defaults. Switching model names makes llama-swap stop one and start
+# the other (a brief reload), since only one fits the configured footprint.
+
+# How long (seconds) to wait for llama-server to become healthy after launch.
+# The Gemma model is ~3.9 GB; 120s is comfortable headroom for a cold load.
+healthCheckTimeout: 120
+
+models:
+  # --- Primary: summarization, deterministic, thinking ENABLED -------------
+  "gemma-4-e4b-summary":
+    # "gemma-4-e4b" kept as an alias so the original model name still routes
+    # here (summarization is the primary use case).
+    aliases:
+      - "gemma-4-e4b"
+
+    # Idle unload: free GPU/RAM after 5 minutes with no requests. The model
+    # reloads automatically on the next request (a few seconds cold-start).
+    ttl: 300
+
+    # Deterministic sampling defaults (--temp 0 / --top-k 1 / --top-p 1.0 /
+    # --repeat-penalty 1.0) baked in so every request is faithful and
+    # reproducible without restating them. Clients can still override per call.
+    # Gemma 4 thinking is left ON — reasoning improves summary quality; keep a
+    # generous max_tokens (≥ 1024) since thinking shares the token budget.
+    # ${PORT} is assigned by llama-swap, which proxies to it.
+    cmd: |
+      llama-server
+      -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
+      --model-draft ./models/mtp-gemma-4-E4B-it.gguf
+      --spec-type draft-mtp
+      --spec-draft-n-max 4
+      -ngl 999
+      -fa off
+      -c 16384
+      --temp 0
+      --top-k 1
+      --top-p 1.0
+      --repeat-penalty 1.0
+      --host 127.0.0.1
+      --port ${PORT}
+
+  # --- Generic: general-purpose chat / generation --------------------------
+  "gemma-4-e4b-generic":
+    ttl: 300
+
+    # Gemma's recommended general-purpose sampling (temp 1.0 / top-k 64 /
+    # top-p 0.95 / min-p 0.0) for balanced, varied output. Thinking left ON.
+    # Override per request for more or less randomness.
+    cmd: |
+      llama-server
+      -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
+      --model-draft ./models/mtp-gemma-4-E4B-it.gguf
+      --spec-type draft-mtp
+      --spec-draft-n-max 4
+      -ngl 999
+      -fa off
+      -c 16384
+      --temp 1.0
+      --top-k 64
+      --top-p 0.95
+      --min-p 0.0
+      --host 127.0.0.1
+      --port ${PORT}
