@@ -218,10 +218,32 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
 > context window (`-c`), and overflowing that fails loudly with an
 > `exceeds the available context size` error instead of quietly cutting output.
 
+### Settings preset: coding tasks
+
+For code generation, `llama-swap.yaml` defines **`gemma-4-e4b-code`** with
+low-temperature, focused sampling (`--temp 0.2 --top-k 40 --top-p 0.95
+--min-p 0.05 --repeat-penalty 1.0`): nearly deterministic for precise output,
+but not fully greedy (avoids degenerate loops on repetitive syntax). It also
+bumps `--spec-draft-n-max 6` — code drafts well, so a larger draft window pays
+off (this is the highest-acceptance, fastest workload; see the benchmark table).
+
+```bash
+curl -s http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemma-4-e4b-code",
+    "messages": [{"role": "user", "content": "Write a Python function that returns the nth Fibonacci number iteratively."}]
+  }'
+```
+
+> `--repeat-penalty` stays `1.0` on purpose: code legitimately repeats tokens
+> (brackets, keywords, indentation), and penalizing repetition corrupts it.
+> Same no-cap rule — leave `max_tokens` unset.
+
 Switching between `gemma-4-e4b-summary` (deterministic, the default — also
-reachable as `gemma-4-e4b`) and `gemma-4-e4b-generic` just by changing the
-`model` field makes llama-swap stop one and start the other, since only one
-fits the configured footprint.
+reachable as `gemma-4-e4b`), `gemma-4-e4b-generic`, and `gemma-4-e4b-code` just
+by changing the `model` field makes llama-swap stop one and start the other,
+since only one fits the configured footprint.
 
 ---
 
@@ -255,6 +277,7 @@ The config (`llama-swap.yaml`) defines two models on the same weights, with a
 |---|---|---|
 | `gemma-4-e4b-summary` (alias `gemma-4-e4b`) | `temp 0, top-k 1, top-p 1.0` | Deterministic summarization (default) |
 | `gemma-4-e4b-generic` | `temp 1.0, top-k 64, top-p 0.95` | General chat / generation |
+| `gemma-4-e4b-code` | `temp 0.2, top-k 40, top-p 0.95, draft-n 6` | Coding tasks |
 
 **Send requests** to the listen address and name the model in the body — that's
 how llama-swap routes (and decides which to load):

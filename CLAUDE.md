@@ -18,8 +18,9 @@ Local setup to run Google's **Gemma 4 E4B** on Apple Metal via `llama.cpp`, with
 load and idle auto-unload.
 
 - `download-gemma4-e4b-mtp.sh` — downloads target model + MTP drafter into `models/`
-- `llama-swap.yaml` — two models on the same weights: `gemma-4-e4b-summary`
-  (deterministic, primary; alias `gemma-4-e4b`) and `gemma-4-e4b-generic`
+- `llama-swap.yaml` — three models on the same weights: `gemma-4-e4b-summary`
+  (deterministic, primary; alias `gemma-4-e4b`), `gemma-4-e4b-generic`, and
+  `gemma-4-e4b-code` (low-temp for programming)
 - `serve-llama-swap.sh` — launches llama-swap (default `127.0.0.1:8080`)
 - `README.md` — user-facing docs
 

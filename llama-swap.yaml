@@ -85,3 +85,31 @@ models:
       --min-p 0.0
       --host 127.0.0.1
       --port ${PORT}
+
+  # --- Code: programming tasks --------------------------------------------
+  "gemma-4-e4b-code":
+    ttl: 300
+
+    # Low-temperature, focused sampling for code: nearly deterministic so output
+    # is precise, but temp 0.2 (not 0) avoids degenerate loops on repetitive
+    # syntax. repeat-penalty stays 1.0 — code legitimately repeats tokens
+    # (brackets, keywords, indentation) and penalizing that breaks it.
+    # Thinking left ON — reasoning helps with logic. Code also drafts well, so
+    # MTP acceptance (and speed) is highest on this workload. Same no-cap rule:
+    # no --predict, omit max_tokens in requests.
+    cmd: |
+      llama-server
+      -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
+      --model-draft ./models/mtp-gemma-4-E4B-it.gguf
+      --spec-type draft-mtp
+      --spec-draft-n-max 6
+      -ngl 999
+      -fa off
+      -c 16384
+      --temp 0.2
+      --top-k 40
+      --top-p 0.95
+      --min-p 0.05
+      --repeat-penalty 1.0
+      --host 127.0.0.1
+      --port ${PORT}
