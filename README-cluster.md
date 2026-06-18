@@ -129,10 +129,13 @@ which runs the equivalent of:
   --rpc 192.168.1.20:50052,192.168.1.30:50052 \
   --split-mode layer \
   -ngl 999 -c 262144 --jinja \
-  --tensor-split 32,16,32 \
+  --tensor-split 32,16,32 --no-mmap \
   --alias qwen3.5-35b-a3b-cluster \
   --host 127.0.0.1 --port 8090
 ```
+
+(`--no-mmap` comes along automatically because `TENSOR_SPLIT` is set — see
+[Keeping the main node light](#keeping-the-main-node-your-workstation-light).)
 
 **`--tensor-split` order (verified, and *not* what you'd guess):** the values map
 to `[each --rpc worker, in RPC_WORKERS order, ..., then the LOCAL device LAST]` —
@@ -176,16 +179,18 @@ llama_kv_cache: RPC0[..:.116] KV buffer size = 2048.00 MiB
 llama_kv_cache: RPC0[..:.64]  KV buffer size = 2560.00 MiB
 ```
 
-**`--tensor-split` alone won't drop the Mac's *total* memory — use `NO_MMAP=1`.**
-The main node `mmap`s the entire 21 GB GGUF to stream weights to the workers, and
-that whole mapping is wrapped as one `MTL0_Mapped` Metal buffer — so RSS *and* the
-`MTL0_Mapped model buffer size` log line both show ~the full model size regardless
-of the split. The split only moves the *compute* share (which layers/KV run on the
-Mac), not the mmap. To actually shrink resident memory, disable the mmap:
+**`--tensor-split` alone won't drop the Mac's *total* memory — that's why setting
+`TENSOR_SPLIT` also turns on `--no-mmap`.** The main node `mmap`s the entire 21 GB
+GGUF to stream weights to the workers, and that whole mapping is wrapped as one
+`MTL0_Mapped` Metal buffer — so RSS *and* the `MTL0_Mapped model buffer size` log
+line both show ~the full model size regardless of the split. The split only moves
+the *compute* share (which layers/KV run on the Mac), not the mmap. The point of
+biasing the split toward the workers is to keep the Mac light, so the script pairs
+the two automatically — set `TENSOR_SPLIT` and the mmap is disabled for you:
 
 ```bash
 RPC_WORKERS=10.22.36.116:50052,10.22.37.64:50052 \
-TENSOR_SPLIT=45,45,10 NO_MMAP=1 \
+TENSOR_SPLIT=45,45,10 \
   ./serve-qwen3-cluster.sh
 ```
 

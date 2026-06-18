@@ -20,8 +20,8 @@
 #
 # Environment:
 #   RPC_WORKERS   (required) comma-separated worker endpoints (ip:port,ip:port)
-#   TENSOR_SPLIT  (optional) e.g. "45,45,10" = [w1, w2, local] — local is LAST
-#   NO_MMAP       1 = pass --no-mmap; frees the main node's RAM (default: unset)
+#   TENSOR_SPLIT  (optional) e.g. "45,45,10" = [w1, w2, local] — local is LAST.
+#                 Setting it also enables --no-mmap (frees the main node's RAM).
 #   PORT          listen port            (default: 8090)
 #   HOST          bind address           (default: 127.0.0.1)
 #   CTX           context size           (default: 262144 — Qwen3.5's native max)
@@ -82,22 +82,20 @@ SAMPLING=(--temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 1.5)
 # expect): the values map to [each --rpc worker in RPC_WORKERS order, ..., then
 # the LOCAL device LAST]. So with two workers, TENSOR_SPLIT=worker1,worker2,mac.
 # To keep this Mac light, its share is the LAST value (e.g. 45,45,10 → ~10% local).
+# Setting TENSOR_SPLIT also turns on --no-mmap. By default the main node mmaps the
+# ENTIRE GGUF to read and stream weights to the workers, so its RSS shows ~the full
+# model size (~21 GB) no matter how little --tensor-split leaves it to compute —
+# that mapping is reclaimable file cache, but it dominates "Memory Used". --no-mmap
+# instead reads weights into buffers and streams the remote layers through a staging
+# buffer, so only the local layer share stays resident (measured: 20.8 GB -> 3.3 GB
+# RSS at 45,45,10). Cost: the full file is read from disk at load (~25s slower here)
+# and there's no cross-restart page cache. The whole point of biasing --tensor-split
+# toward the workers is to keep this Mac light, so the two go hand in hand: if you've
+# set a split you want the RAM savings too. Without TENSOR_SPLIT, mmap stays on.
 SPLIT=()
+MMAP=()
 if [[ -n "${TENSOR_SPLIT:-}" ]]; then
   SPLIT=(--tensor-split "$TENSOR_SPLIT")
-fi
-
-# NO_MMAP=1 passes --no-mmap. By default the main node mmaps the ENTIRE GGUF to
-# read and stream weights to the workers, so its RSS shows ~the full model size
-# (~21 GB) no matter how little --tensor-split leaves it to compute — that mapping
-# is reclaimable file cache, but it dominates "Memory Used". --no-mmap instead
-# reads weights into buffers and streams the remote layers through a staging
-# buffer, so only the local layer share stays resident (measured: 20.8 GB -> 3.3 GB
-# RSS at 45,45,10). Cost: the full file is read from disk at load (~25s slower
-# here) and there's no cross-restart page cache. Worth it to keep a workstation
-# main node light; skip it if the main node has RAM to spare and you restart often.
-MMAP=()
-if [[ "${NO_MMAP:-}" == "1" ]]; then
   MMAP=(--no-mmap)
 fi
 
@@ -105,7 +103,7 @@ fi
 log "Model       : $MODEL"
 log "Workers     : $RPC_WORKERS"
 log "Tensor split: ${TENSOR_SPLIT:-(auto)}"
-log "mmap        : $([[ "${NO_MMAP:-}" == "1" ]] && echo 'off (--no-mmap, frees main-node RAM)' || echo 'on')"
+log "mmap        : $([[ -n "${TENSOR_SPLIT:-}" ]] && echo 'off (--no-mmap, frees main-node RAM)' || echo 'on')"
 log "Listening   : http://${HOST}:${PORT}  (alias: qwen3.5-35b-a3b-cluster)"
 log "Note        : shares port ${PORT} with llama-swap — run only one at a time."
 echo
