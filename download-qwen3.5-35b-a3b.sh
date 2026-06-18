@@ -86,7 +86,7 @@ cat <<EOF
   ./llama.cpp/bin/llama-server \
     -m "${TARGET_DIR}/${MODEL_FILE}" \
     --rpc <WORKER1_IP>:50052,<WORKER2_IP>:50052 \
-    -ngl 999 -c 16384 --jinja \
+    -ngl 999 -c 262144 --jinja \
     --alias qwen3.5-35b-a3b-cluster \
     --host 127.0.0.1 --port 8090
 

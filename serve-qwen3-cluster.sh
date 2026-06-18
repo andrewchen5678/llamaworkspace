@@ -23,7 +23,7 @@
 #   TENSOR_SPLIT  (optional) split weights e.g. "32,32,16" = [local, w1, w2] by RAM
 #   PORT          listen port            (default: 8090)
 #   HOST          bind address           (default: 127.0.0.1)
-#   CTX           context size           (default: 16384)
+#   CTX           context size           (default: 262144 — Qwen3.5's native max)
 #   MODEL         model path             (default: ./models/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf)
 #   LLAMACPP_DIR  dir holding llama-server (default: ./llama.cpp/bin)
 
@@ -35,7 +35,10 @@ cd "$(dirname "$0")"
 # ---- configuration ---------------------------------------------------------
 PORT="${PORT:-8090}"
 HOST="${HOST:-127.0.0.1}"
-CTX="${CTX:-16384}"
+# Qwen3.5-35B-A3B's native context length (262144 = 256K). Extensible to ~1M with
+# YaRN, but that needs explicit RoPE-scaling flags; the native max is the ceiling
+# here. A full 256K KV cache is large — lower CTX if a node runs out of memory.
+CTX="${CTX:-262144}"
 MODEL="${MODEL:-./models/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf}"
 LLAMACPP_DIR="${LLAMACPP_DIR:-./llama.cpp/bin}"
 LLAMA_SERVER="${LLAMACPP_DIR}/llama-server"

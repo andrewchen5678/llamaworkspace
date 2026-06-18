@@ -105,7 +105,7 @@ RPC_WORKERS=192.168.1.20:50052,192.168.1.30:50052 ./serve-qwen3-cluster.sh
 Listens on `http://127.0.0.1:8090` with alias `qwen3.5-35b-a3b-cluster`. Stop it
 with Ctrl-C.
 
-### Worked example: 3 computers
+### Example configuration: 3 computers (untested)
 
 | Role | Machine | RAM | LAN IP | Process |
 |---|---|---|---|---|
@@ -127,7 +127,7 @@ which runs the equivalent of:
 ./llama.cpp/bin/llama-server \
   -m ./models/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf \
   --rpc 192.168.1.20:50052,192.168.1.30:50052 \
-  -ngl 999 -c 16384 --jinja \
+  -ngl 999 -c 262144 --jinja \
   --tensor-split 32,32,16 \
   --alias qwen3.5-35b-a3b-cluster \
   --host 127.0.0.1 --port 8090
