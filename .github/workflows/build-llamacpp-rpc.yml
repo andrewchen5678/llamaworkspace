@@ -36,17 +36,27 @@ jobs:
       fail-fast: true
       matrix:
         include:
+          # These binaries run on OTHER machines, so they must NOT be compiled with
+          # -march=native (GGML_NATIVE's default ON), which bakes in the *build
+          # runner's* ISA. A GitHub runner CPU has newer instructions (e.g.
+          # AVX-512) than an older target like a Coffee Lake i5; such a binary
+          # crashes immediately with an illegal instruction (Windows exit
+          # 0xC000001D). So GGML_NATIVE=OFF everywhere, and on x86 add
+          # GGML_CPU_ALL_VARIANTS (needs GGML_BACKEND_DL): this builds one ggml-cpu
+          # library per ISA level (sse42/avx/avx2/avx512/...) and loads the best
+          # one the running CPU supports at startup — i.e. one binary works on ANY
+          # x86 box, oldest to newest. (Apple Silicon is a single arm64 baseline.)
           - name: macos-arm64-metal
             runs-on: macos-15
             # Apple Silicon: Metal + embed the shader lib so the binary is
             # self-contained (no external default.metallib to ship).
-            cmake_flags: "-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF"
+            cmake_flags: "-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF"
           - name: linux-amd64-cpu
             runs-on: ubuntu-latest
-            cmake_flags: "-DGGML_RPC=ON -DLLAMA_CURL=OFF"
+            cmake_flags: "-DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF"
           - name: windows-amd64-cpu
             runs-on: windows-latest
-            cmake_flags: "-DGGML_RPC=ON -DLLAMA_CURL=OFF"
+            cmake_flags: "-DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF"
 
     steps:
       - name: Checkout llama.cpp at pinned tag

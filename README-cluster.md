@@ -158,6 +158,7 @@ silently truncated.
 | Symptom | Cause / fix |
 |---|---|
 | RPC connection refused / crash on load | A node is running a different llama.cpp build. Confirm `BUILD_COMMIT.txt` is **identical on every node** (re-run `./fetch-llamacpp-rpc.sh`). |
+| `rpc-server` exits right after listing devices — Windows exit code `0xC000001D` / `-1073741795` (illegal instruction) | The binary was built with a newer CPU's instruction set than this node has (older CPUs lack AVX-512 etc.). The CI build pins `GGML_NATIVE=OFF` + `GGML_CPU_ALL_VARIANTS` for exactly this; if you hit it, re-run the **`build-llamacpp-rpc`** workflow and re-fetch the binary. |
 | Worker unreachable | Check the worker's firewall and that `rpc-server` is bound on the LAN IP/port in `RPC_WORKERS`. The RPC server has no auth — keep it on a trusted LAN/VPN. |
 | Download stalls partway | Re-run `./download-qwen3.5-35b-a3b.sh` — `wget --continue` resumes. |
 | Crash mentioning DeltaNet / recurrent state | Qwen3.5 is a hybrid (Gated DeltaNet + MoE) model; splitting recurrent layers over RPC is a known rough edge upstream. Try without RPC on a single box, or update the pinned build. |
