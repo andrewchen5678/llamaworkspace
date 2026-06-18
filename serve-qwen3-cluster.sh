@@ -64,13 +64,6 @@ if [[ ! -f "$MODEL" ]]; then
   exit 1
 fi
 
-# The CI binaries ship their shared libs (libggml.so.0, libllama.so, …) right
-# next to llama-server, but the linker doesn't search the binary's own directory.
-# Point the loader at the lib dir (absolute path so it survives `exec`).
-LIB_DIR="$(cd "$LLAMACPP_DIR" && pwd)"
-export LD_LIBRARY_PATH="${LIB_DIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-export DYLD_LIBRARY_PATH="${LIB_DIR}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
-
 # Qwen3.5-35B-A3B recommended general sampling (thinking ON, generic use).
 SAMPLING=(--temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 1.5)
 
