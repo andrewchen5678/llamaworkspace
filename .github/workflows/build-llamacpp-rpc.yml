@@ -31,7 +31,9 @@ jobs:
     name: build (${{ matrix.name }})
     runs-on: ${{ matrix.runs-on }}
     strategy:
-      fail-fast: false
+      # Fail fast: if any platform build fails, cancel the others immediately
+      # (a Release needs all three anyway, so finishing the rest wastes minutes).
+      fail-fast: true
       matrix:
         include:
           - name: macos-arm64-metal
