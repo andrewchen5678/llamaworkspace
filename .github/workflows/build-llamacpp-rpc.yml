@@ -38,16 +38,18 @@ jobs:
         include:
           # Two independent portability concerns, both required:
           #
-          # 1. ISA portability. These binaries run on OTHER machines, so they must
-          #    NOT be compiled with -march=native (GGML_NATIVE's default ON), which
-          #    bakes in the *build runner's* ISA. A GitHub runner CPU has newer
-          #    instructions (e.g. AVX-512) than an older target like a Coffee Lake
-          #    i5; such a binary crashes immediately with an illegal instruction
-          #    (Windows exit 0xC000001D). So GGML_NATIVE=OFF everywhere, and on x86
-          #    add GGML_CPU_ALL_VARIANTS (needs GGML_BACKEND_DL): this builds one
-          #    ggml-cpu library per ISA level (sse42/avx/avx2/avx512/...) and loads
-          #    the best one the running CPU supports at startup — one binary works
-          #    on ANY x86 box. (Apple Silicon is a single arm64 baseline.)
+          # 1. ISA portability (x86 CPU targets only). These binaries run on OTHER
+          #    machines, so they must NOT be compiled with -march=native
+          #    (GGML_NATIVE's default ON), which bakes in the *build runner's* ISA.
+          #    A GitHub runner CPU has newer instructions (e.g. AVX-512) than an
+          #    older target like a Coffee Lake i5; such a binary crashes immediately
+          #    with an illegal instruction (Windows exit 0xC000001D). So on x86,
+          #    GGML_NATIVE=OFF plus GGML_CPU_ALL_VARIANTS (needs GGML_BACKEND_DL):
+          #    this builds one ggml-cpu library per ISA level
+          #    (sse42/avx/avx2/avx512/...) and loads the best one the running CPU
+          #    supports at startup — one binary works on ANY x86 box. The macOS
+          #    build is exempt: it runs compute on Metal (GPU), and the runner and
+          #    target are both Apple Silicon sharing the arm64 baseline.
           #
           # 2. Library loading. The binaries and their shared libs ship flat in one
           #    directory (and BACKEND_DL adds the per-ISA variant libs to it).
@@ -60,7 +62,7 @@ jobs:
             runs-on: macos-15
             # Apple Silicon: Metal + embed the shader lib so the binary is
             # self-contained (no external default.metallib to ship).
-            cmake_flags: "-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH=@loader_path"
+            cmake_flags: "-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH=@loader_path"
           - name: linux-amd64-cpu
             runs-on: ubuntu-latest
             cmake_flags: "-DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH='$ORIGIN'"
