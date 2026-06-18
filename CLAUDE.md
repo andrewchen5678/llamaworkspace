@@ -39,7 +39,9 @@ time. All nodes must run the **identical** llama.cpp build — pinned to tag
 - `start-rpc-worker.sh` — runs `rpc-server` on a worker (non-Mac) node
 - `serve-qwen3-cluster.sh` — runs `llama-server` split across the cluster (main node)
 
-- `README.md` — user-facing docs
+- `README.md` — overview + shared requirements (CI-built binary); links to the two
+  workflow guides: `README-llama-swap.md` (single-machine Gemma) and
+  `README-cluster.md` (Qwen3.5 cluster)
 
 ## Conventions / gotchas
 
