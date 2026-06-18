@@ -117,7 +117,7 @@ On each worker: `./start-rpc-worker.sh`. On the Mac:
 
 ```bash
 RPC_WORKERS=192.168.1.20:50052,192.168.1.30:50052 \
-TENSOR_SPLIT=32,32,16 \
+TENSOR_SPLIT=32,16,32 \
   ./serve-qwen3-cluster.sh
 ```
 
@@ -129,51 +129,78 @@ which runs the equivalent of:
   --rpc 192.168.1.20:50052,192.168.1.30:50052 \
   --split-mode layer \
   -ngl 999 -c 262144 --jinja \
-  --tensor-split 32,32,16 \
+  --tensor-split 32,16,32 \
   --alias qwen3.5-35b-a3b-cluster \
   --host 127.0.0.1 --port 8090
 ```
 
-`--tensor-split` values map to `[local device, then each --rpc endpoint in
-order]` — here `32,32,16` weights the layer split by each node's free RAM. In the
-default `layer` split mode this governs **both** the layer weights and the
-per-layer KV cache, so each node holds the KV only for its own layers (the cache
-is distributed across the cluster, not duplicated). Omit `TENSOR_SPLIT` to let
-llama.cpp auto-distribute proportionally by memory.
+**`--tensor-split` order (verified, and *not* what you'd guess):** the values map
+to `[each --rpc worker, in RPC_WORKERS order, ..., then the LOCAL device LAST]` —
+**not** local-first. So with two workers it is `worker1,worker2,localMac`. Here
+`32,16,32` gives worker1 (`.20`, 32 GB) 32, worker2 (`.30`, 16 GB) 16, and the Mac
+32 — weighting the split by each node's free RAM. In the default `layer` split
+mode these proportions govern **both** the layer weights and the per-layer KV
+cache, so each node holds the KV only for its own layers (the cache is distributed
+across the cluster, not duplicated). Omit `TENSOR_SPLIT` to let llama.cpp
+auto-distribute proportionally by memory.
 
-> **Omitting `TENSOR_SPLIT` splits by *weights* only.** With `-fit off` (which this
-> script sets so your split is authoritative), the default no-split distribution
-> weighs each device by reported free memory but reserves **no** headroom for the
-> KV cache or compute buffers — auto-fit, which would account for those, is off. So
-> on a node that's tight on memory the default can over-commit and fail at
-> allocation; set an explicit `TENSOR_SPLIT` to bias layers off it.
+> **Omitting `TENSOR_SPLIT` splits by *weights* only.** The default no-split
+> distribution weighs each device by reported free memory but reserves **no**
+> headroom for the KV cache or compute buffers. So on a node that's tight on memory
+> the default can over-commit and fail at allocation; set an explicit `TENSOR_SPLIT`
+> to bias layers off it.
 
 ### Keeping the main node (your workstation) light
 
-The first `--tensor-split` value is the **local (Mac) share**. Lower it to keep
-the model off your workstation and push it onto the workers:
+The **last** `--tensor-split` value is the local (Mac) share — the order is
+workers-first, local-last (see above). Lower that last value to keep the model off
+your workstation and push it onto the workers:
 
 ```bash
-# Mac holds ~10% of layers+KV; workers carry the rest
+# Mac holds ~10% of layers+KV; workers carry the rest (verified on the b9701 build)
 RPC_WORKERS=192.168.1.20:50052,192.168.1.30:50052 \
-TENSOR_SPLIT=10,45,45 \
+TENSOR_SPLIT=45,45,10 \
   ./serve-qwen3-cluster.sh
 
 # Mac holds zero model layers (it just reads the GGUF and serves)
-TENSOR_SPLIT=0,55,45 ...   # trades away all Metal compute → slowest, lightest on Mac
+TENSOR_SPLIT=55,45,0 ...   # trades away all Metal compute → slowest, lightest on Mac
 ```
 
-**Measuring it correctly (macOS).** Don't trust `ps`/`top` **RSS** or Activity
-Monitor's "Real Mem" — the main node `mmap`s the entire GGUF to stream weights to
-the workers, so RSS shows ~the full model size (~22 GB) *regardless* of the split.
-That mapping is clean, file-backed, and reclaimable — not real memory pressure.
-Watch the **physical footprint** instead (Activity Monitor's "Memory" column, or
-`vmmap --summary <pid> | grep 'Physical footprint'`); that's where the split
-actually shows up. At `10,45,45` the Mac's physical footprint is ~2.7 GB.
+**Verifying the split actually landed.** Run with `-lv 4` (verbose) and read the
+per-device buffer-size lines llama.cpp prints during load — the KV-cache lines are
+the cleanest signal (one equal-ish slice per layer):
 
-> `serve-qwen3-cluster.sh` passes `-fit off` so your `--tensor-split` is
-> authoritative. With llama.cpp's auto-fit (`-fit on`, the default) the load can
-> hang at `fitting params to device memory ...` and/or override your split.
+```
+llama_kv_cache:       MTL0 KV buffer size =  512.00 MiB   ← Mac, ~10%
+llama_kv_cache: RPC0[..:.116] KV buffer size = 2048.00 MiB
+llama_kv_cache: RPC0[..:.64]  KV buffer size = 2560.00 MiB
+```
+
+**`--tensor-split` alone won't drop the Mac's *total* memory — use `NO_MMAP=1`.**
+The main node `mmap`s the entire 21 GB GGUF to stream weights to the workers, and
+that whole mapping is wrapped as one `MTL0_Mapped` Metal buffer — so RSS *and* the
+`MTL0_Mapped model buffer size` log line both show ~the full model size regardless
+of the split. The split only moves the *compute* share (which layers/KV run on the
+Mac), not the mmap. To actually shrink resident memory, disable the mmap:
+
+```bash
+RPC_WORKERS=10.22.36.116:50052,10.22.37.64:50052 \
+TENSOR_SPLIT=45,45,10 NO_MMAP=1 \
+  ./serve-qwen3-cluster.sh
+```
+
+Measured effect on the Mac (`45,45,10`): **RSS 20.8 GB → 3.3 GB** — with `--no-mmap`
+the remote layers stream through a staging buffer instead of being mapped in, so
+only the Mac's real ~2 GB layer share + 512 MiB KV stays resident. Cost: the full
+file is read from disk at load (~25s slower) and there's no cross-restart page
+cache — fine for a long-running cluster server. (The default mmap is reclaimable
+file cache, so it's not *pressure* per se, but it dominates "Memory Used"; drop it
+if you want the RAM visibly free for other apps.)
+
+**Verifying placement:** the `MTL0_Mapped` line is the whole-file mmap and lies
+about the Mac's share; the per-layer **KV buffer lines** (shown above) are the
+honest signal. With `--no-mmap` the model line also becomes honest (`MTL0 model
+buffer size = 2019 MiB` ≈ the true 10%).
 
 ## 6. Send a request
 

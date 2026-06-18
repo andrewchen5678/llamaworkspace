@@ -20,7 +20,8 @@
 #
 # Environment:
 #   RPC_WORKERS   (required) comma-separated worker endpoints (ip:port,ip:port)
-#   TENSOR_SPLIT  (optional) split weights e.g. "32,32,16" = [local, w1, w2] by RAM
+#   TENSOR_SPLIT  (optional) e.g. "45,45,10" = [w1, w2, local] — local is LAST
+#   NO_MMAP       1 = pass --no-mmap; frees the main node's RAM (default: unset)
 #   PORT          listen port            (default: 8090)
 #   HOST          bind address           (default: 127.0.0.1)
 #   CTX           context size           (default: 262144 — Qwen3.5's native max)
@@ -76,15 +77,35 @@ SAMPLING=(--temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 1.5)
 # --tensor-split is optional; only pass it when TENSOR_SPLIT is set. In layer
 # split mode its proportions govern BOTH the layer weights and the per-layer KV
 # cache, so it's the single lever for biasing memory away from a tight node.
+#
+# ORDER (verified empirically on the b9701 build, NOT [local-first] as you might
+# expect): the values map to [each --rpc worker in RPC_WORKERS order, ..., then
+# the LOCAL device LAST]. So with two workers, TENSOR_SPLIT=worker1,worker2,mac.
+# To keep this Mac light, its share is the LAST value (e.g. 45,45,10 → ~10% local).
 SPLIT=()
 if [[ -n "${TENSOR_SPLIT:-}" ]]; then
   SPLIT=(--tensor-split "$TENSOR_SPLIT")
+fi
+
+# NO_MMAP=1 passes --no-mmap. By default the main node mmaps the ENTIRE GGUF to
+# read and stream weights to the workers, so its RSS shows ~the full model size
+# (~21 GB) no matter how little --tensor-split leaves it to compute — that mapping
+# is reclaimable file cache, but it dominates "Memory Used". --no-mmap instead
+# reads weights into buffers and streams the remote layers through a staging
+# buffer, so only the local layer share stays resident (measured: 20.8 GB -> 3.3 GB
+# RSS at 45,45,10). Cost: the full file is read from disk at load (~25s slower
+# here) and there's no cross-restart page cache. Worth it to keep a workstation
+# main node light; skip it if the main node has RAM to spare and you restart often.
+MMAP=()
+if [[ "${NO_MMAP:-}" == "1" ]]; then
+  MMAP=(--no-mmap)
 fi
 
 # ---- main ------------------------------------------------------------------
 log "Model       : $MODEL"
 log "Workers     : $RPC_WORKERS"
 log "Tensor split: ${TENSOR_SPLIT:-(auto)}"
+log "mmap        : $([[ "${NO_MMAP:-}" == "1" ]] && echo 'off (--no-mmap, frees main-node RAM)' || echo 'on')"
 log "Listening   : http://${HOST}:${PORT}  (alias: qwen3.5-35b-a3b-cluster)"
 log "Note        : shares port ${PORT} with llama-swap — run only one at a time."
 echo
@@ -102,18 +123,22 @@ echo
 # -sm layer (the default, made explicit) splits the model layer-wise across the
 # local device + every --rpc worker, and allocates each layer's KV cache on the
 # node that holds it — so the KV cache is distributed across the cluster, not
-# duplicated. --tensor-split sets the proportions; omitted, it splits by memory.
+# duplicated. --tensor-split sets the proportions (see ORDER note above); omitted,
+# it splits proportionally to each device's free memory.
 #
-# -fit off disables llama.cpp's auto-fit ("fitting params to device memory"),
-# which otherwise re-distributes layers to fill free memory and can override the
-# --tensor-split / -ngl we set. This cluster places the model deliberately, so we
-# make our numbers authoritative rather than letting auto-fit second-guess them.
+# -fit off pins placement to exactly our --tensor-split / -ngl / -c, with no
+# auto-fit second-guessing. Note this is belt-and-suspenders, not load-bearing:
+# testing showed -fit on vs off produce byte-identical placement once
+# --tensor-split and -c are set, so it's purely for determinism. (Either way, the
+# "fitting params to device memory ..." log line is followed by a ~40s weight-load
+# pause — that's normal loading, not a hang.)
 exec "$LLAMA_SERVER" \
   -m "$MODEL" \
   --rpc "$RPC_WORKERS" \
   --split-mode layer \
   -fit off \
   "${SPLIT[@]}" \
+  "${MMAP[@]}" \
   -ngl 999 \
   -c "$CTX" \
   --jinja \
