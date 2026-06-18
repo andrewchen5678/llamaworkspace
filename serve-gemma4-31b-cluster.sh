@@ -22,8 +22,8 @@
 #
 # Environment:
 #   RPC_WORKERS   (required) comma-separated worker endpoints (ip:port,ip:port)
-#   TENSOR_SPLIT  (optional) e.g. "45,45,10" = [w1, w2, local] — local is LAST
-#   NO_MMAP       1 = pass --no-mmap; frees the main node's RAM (default: unset)
+#   TENSOR_SPLIT  (optional) e.g. "45,45,10" = [w1, w2, local] — local is LAST.
+#                 Setting it also enables --no-mmap (frees the main node's RAM).
 #   NO_MTP        1 = disable the MTP drafter (fallback if MTP+RPC misbehaves)
 #   SPEC_N_MAX    max tokens the drafter proposes per step  (default: 4)
 #   PORT          listen port            (default: 8090)
@@ -103,22 +103,20 @@ SAMPLING=(--temp 1.0 --top-k 64 --top-p 0.95 --min-p 0.0)
 # expect): the values map to [each --rpc worker in RPC_WORKERS order, ..., then
 # the LOCAL device LAST]. So with two workers, TENSOR_SPLIT=worker1,worker2,mac.
 # To keep this Mac light, its share is the LAST value (e.g. 45,45,10 → ~10% local).
+# Setting TENSOR_SPLIT also turns on --no-mmap. By default the main node mmaps the
+# ENTIRE GGUF to read and stream weights to the workers, so its RSS shows ~the full
+# model size (~19 GB) no matter how little --tensor-split leaves it to compute —
+# that mapping is reclaimable file cache, but it dominates "Memory Used". --no-mmap
+# instead reads weights into buffers and streams the remote layers through a staging
+# buffer, so only the local layer share stays resident. Cost: the full file is read
+# from disk at load (slower) and there's no cross-restart page cache. The whole point
+# of biasing --tensor-split toward the workers is to keep this Mac light, so the two
+# go hand in hand: if you've set a split you want the RAM savings too. Without
+# TENSOR_SPLIT, mmap stays on.
 SPLIT=()
+MMAP=()
 if [[ -n "${TENSOR_SPLIT:-}" ]]; then
   SPLIT=(--tensor-split "$TENSOR_SPLIT")
-fi
-
-# NO_MMAP=1 passes --no-mmap. By default the main node mmaps the ENTIRE GGUF to
-# read and stream weights to the workers, so its RSS shows ~the full model size
-# (~19 GB) no matter how little --tensor-split leaves it to compute — that mapping
-# is reclaimable file cache, but it dominates "Memory Used". --no-mmap instead
-# reads weights into buffers and streams the remote layers through a staging
-# buffer, so only the local layer share stays resident. Cost: the full file is
-# read from disk at load (slower) and there's no cross-restart page cache. Worth
-# it to keep a workstation main node light; skip it if the main node has RAM to
-# spare and you restart often.
-MMAP=()
-if [[ "${NO_MMAP:-}" == "1" ]]; then
   MMAP=(--no-mmap)
 fi
 
@@ -127,7 +125,7 @@ log "Model       : $MODEL"
 log "MTP drafter : $([[ "${NO_MTP:-}" == "1" ]] && echo '(disabled, NO_MTP=1)' || echo "$MODEL_DRAFT (n-max $SPEC_N_MAX)")"
 log "Workers     : $RPC_WORKERS"
 log "Tensor split: ${TENSOR_SPLIT:-(auto)}"
-log "mmap        : $([[ "${NO_MMAP:-}" == "1" ]] && echo 'off (--no-mmap, frees main-node RAM)' || echo 'on')"
+log "mmap        : $([[ -n "${TENSOR_SPLIT:-}" ]] && echo 'off (--no-mmap, frees main-node RAM)' || echo 'on')"
 log "Listening   : http://${HOST}:${PORT}  (alias: gemma-4-31b-cluster)"
 log "Note        : shares port ${PORT} with llama-swap and the Qwen cluster — run only one at a time."
 echo
