@@ -41,6 +41,13 @@ if [[ ! -x "$RPC_SERVER" ]]; then
   exit 1
 fi
 
+# The CI binaries ship their shared libs (libggml.so.0, libllama.so, …) right
+# next to rpc-server, but the linker doesn't search the binary's own directory.
+# Point the loader at the lib dir (absolute path so it survives `exec`).
+LIB_DIR="$(cd "$LLAMACPP_DIR" && pwd)"
+export LD_LIBRARY_PATH="${LIB_DIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export DYLD_LIBRARY_PATH="${LIB_DIR}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
+
 log "Starting RPC worker on ${RPC_HOST}:${RPC_PORT}"
 log "Binary: $RPC_SERVER"
 log "Reminder: trusted LAN/VPN only — this endpoint has no authentication."
