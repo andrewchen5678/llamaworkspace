@@ -64,10 +64,10 @@ llama-server \
   --spec-draft-n-max 4 \
   -ngl 999 -fa off \
   -c 16384 \
-  --host 127.0.0.1 --port 8080
+  --host 127.0.0.1 --port 8090
 ```
 
-Then open the web UI at <http://127.0.0.1:8080> or send API requests (below).
+Then open the web UI at <http://127.0.0.1:8090> or send API requests (below).
 
 **Flag reference:**
 
@@ -96,7 +96,7 @@ Just omit the draft flags:
 
 ```bash
 llama-server -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
-  -ngl 999 -fa off -c 16384 --host 127.0.0.1 --port 8080
+  -ngl 999 -fa off -c 16384 --host 127.0.0.1 --port 8090
 ```
 
 ---
@@ -104,7 +104,7 @@ llama-server -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
 ## 3. Send a request
 
 ```bash
-curl -s http://127.0.0.1:8080/v1/chat/completions \
+curl -s http://127.0.0.1:8090/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [{"role": "user", "content": "Explain how a CPU cache works."}],
@@ -131,7 +131,7 @@ with thinking on, reasoning tokens count against it, so a small cap truncates th
 summary; left unset, the server generates until done:
 
 ```bash
-curl -s http://127.0.0.1:8080/v1/chat/completions \
+curl -s http://127.0.0.1:8090/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gemma-4-e4b",
@@ -146,7 +146,7 @@ Running `llama-server` directly (no llama-swap), or to override the defaults,
 set them explicitly per request:
 
 ```bash
-curl -s http://127.0.0.1:8080/v1/chat/completions \
+curl -s http://127.0.0.1:8090/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [
@@ -179,7 +179,7 @@ llama-server -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
   --model-draft ./models/mtp-gemma-4-E4B-it.gguf \
   --spec-type draft-mtp --spec-draft-n-max 4 \
   -ngl 999 -fa off -c 16384 \
-  --host 127.0.0.1 --port 8080
+  --host 127.0.0.1 --port 8090
 ```
 
 > **Bonus:** `temperature: 0` also **maximizes MTP draft acceptance** — greedy
@@ -205,7 +205,7 @@ balanced sampling (`--temp 1.0 --top-k 64 --top-p 0.95 --min-p 0.0`) baked in.
 Same weights and MTP drafter — only the sampling defaults differ:
 
 ```bash
-curl -s http://127.0.0.1:8080/v1/chat/completions \
+curl -s http://127.0.0.1:8090/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gemma-4-e4b-generic",
@@ -232,7 +232,7 @@ off (this is the highest-acceptance, fastest workload; see the benchmark table)
 > attention (`-fa on`) to shrink it, or lower `-c`.
 
 ```bash
-curl -s http://127.0.0.1:8080/v1/chat/completions \
+curl -s http://127.0.0.1:8090/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gemma-4-e4b-code",
@@ -270,7 +270,7 @@ curl -sL https://github.com/mostlygeek/llama-swap/releases/latest/download/llama
 **Run** (from the project root, so the relative model paths resolve):
 
 ```bash
-./serve-llama-swap.sh                 # listens on 127.0.0.1:8080
+./serve-llama-swap.sh                 # listens on 127.0.0.1:8090
 ./serve-llama-swap.sh 127.0.0.1:9090  # custom address
 ```
 
@@ -287,18 +287,148 @@ The config (`llama-swap.yaml`) defines two models on the same weights, with a
 how llama-swap routes (and decides which to load):
 
 ```bash
-curl -s http://127.0.0.1:8080/v1/chat/completions \
+curl -s http://127.0.0.1:8090/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"gemma-4-e4b-generic","messages":[{"role":"user","content":"hi"}],"max_tokens":256}'
 ```
 
-**Web UI:** don't open `http://localhost:8080/` — that bundled page probes
+**Web UI:** don't open `http://localhost:8090/` — that bundled page probes
 `/props` with `autoload=false` and shows *"Server unavailable / 404"* until a
 model is running. Instead open the model's own llama.cpp UI through the
 `/upstream/<model>/` route, which loads it on demand:
 
-- <http://localhost:8080/upstream/gemma-4-e4b-summary/>
-- <http://localhost:8080/upstream/gemma-4-e4b-generic/>
+- <http://localhost:8090/upstream/gemma-4-e4b-summary/>
+- <http://localhost:8090/upstream/gemma-4-e4b-generic/>
+
+> **Why port 8090?** `8080` is commonly occupied by other dev servers, so this
+> setup uses `8090` throughout. The cluster setup below also listens on `8090`
+> (you run only one of llama-swap *or* the cluster at a time — see below).
+
+---
+
+## Distributed (cluster) inference: Qwen3-30B-A3B over RPC
+
+Everything above runs a single model on one Mac. This section is a **separate**
+setup that splits a larger Mixture-of-Experts model, **Qwen3-30B-A3B** (~30B
+total / ~3B active, ~18 GB at Q4), across **multiple machines** using llama.cpp's
+**RPC** backend — pooling the memory of a Mac plus one or more non-Mac boxes.
+
+> **Separate from llama-swap.** llama-swap (above) is the single-machine Gemma
+> path. The cluster is launched directly by `serve-qwen3-cluster.sh` and has no
+> idle auto-unload. **Both listen on `8090`, so run only one at a time** — stop
+> llama-swap before starting the cluster, and vice versa.
+
+> **Is a cluster even worth it?** At ~18 GB, if one machine has ≥24 GB free RAM,
+> RPC is *slower* than running locally (activations cross the network every
+> layer). The cluster only pays off when **no single box** fits the model. If one
+> box almost fits, prefer single-machine MoE expert offload to CPU RAM instead:
+> add `--n-cpu-moe N` (or `-ot ".ffn_.*_exps.=CPU"`) to keep it on one machine.
+
+### Version pinning (critical)
+
+llama.cpp RPC requires **every node to run the *identical* build** — a version
+mismatch corrupts the protocol and crashes. The upstream prebuilt releases also
+don't ship `rpc-server` / aren't built with `-DGGML_RPC=ON`. So this repo builds
+llama.cpp itself, from a pinned tag (**`b9701`**), for all node platforms, via a
+GitHub Action.
+
+### 1. Build the pinned binaries (once, in CI)
+
+Run the **`build-llamacpp-rpc`** workflow (Actions tab → Run workflow, or
+`gh workflow run build-llamacpp-rpc.yml -f tag=b9701`). It builds
+`llama-server` + `rpc-server` with `-DGGML_RPC=ON` for three targets and
+publishes them to a Release tagged `llamacpp-rpc-b9701`:
+
+| Platform | Backend |
+|---|---|
+| macOS arm64 | Metal (embedded shader lib) |
+| Linux amd64 | CPU |
+| Windows amd64 | CPU |
+
+### 2. Fetch the binaries on every node
+
+```bash
+./fetch-llamacpp-rpc.sh        # auto-detects platform, extracts to ./llama.cpp/bin
+```
+
+Needs the GitHub CLI (`gh`) for the private Release. On **Windows**, download the
+`llama-b9701-windows-amd64-cpu-rpc.zip` asset from the Release page manually and
+extract it to `.\llama.cpp\bin`. Each artifact contains a `BUILD_COMMIT.txt` —
+confirm it's **identical on every node**.
+
+### 3. Download the model (main node only)
+
+```bash
+./download-qwen3-30b-a3b.sh ./models
+```
+
+The main node reads the GGUF and streams weights to the workers over RPC, so
+**workers need no local model copy**. (For thinking-on, set
+`HF_REPO=unsloth/Qwen3-30B-A3B-Thinking-2507-GGUF`.)
+
+### 4. Start the workers (each non-Mac box)
+
+```bash
+./start-rpc-worker.sh          # listens on 0.0.0.0:50052
+```
+
+> **Security:** the RPC server has no authentication. Bind it only on a trusted
+> LAN/VPN — never expose it to the public internet.
+
+### 5. Run the cluster (main / Mac node)
+
+```bash
+RPC_WORKERS=192.168.1.20:50052,192.168.1.30:50052 ./serve-qwen3-cluster.sh
+```
+
+Listens on `http://127.0.0.1:8090` with alias `qwen3-30b-a3b-cluster`. Stop it
+with Ctrl-C.
+
+### Worked example: 3 computers
+
+| Role | Machine | RAM | LAN IP | Process |
+|---|---|---|---|---|
+| main | Mac Studio (arm64, Metal) | 32 GB | 192.168.1.10 | `serve-qwen3-cluster.sh` |
+| worker 1 | Linux amd64 (CPU) | 32 GB | 192.168.1.20 | `rpc-server` |
+| worker 2 | Windows amd64 (CPU) | 16 GB | 192.168.1.30 | `rpc-server` |
+
+On each worker: `./start-rpc-worker.sh`. On the Mac:
+
+```bash
+RPC_WORKERS=192.168.1.20:50052,192.168.1.30:50052 \
+TENSOR_SPLIT=32,32,16 \
+  ./serve-qwen3-cluster.sh
+```
+
+which runs the equivalent of:
+
+```bash
+./llama.cpp/bin/llama-server \
+  -m ./models/Qwen3-30B-A3B-Instruct-2507-UD-Q4_K_XL.gguf \
+  --rpc 192.168.1.20:50052,192.168.1.30:50052 \
+  -ngl 999 -c 16384 \
+  --tensor-split 32,32,16 \
+  --alias qwen3-30b-a3b-cluster \
+  --host 127.0.0.1 --port 8090
+```
+
+`--tensor-split` values map to `[local device, then each --rpc endpoint in
+order]` — here `32,32,16` weights the layer split by each node's free RAM. Omit
+`TENSOR_SPLIT` to let llama.cpp auto-distribute proportionally.
+
+### Send a request
+
+```bash
+curl -s http://127.0.0.1:8090/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3-30b-a3b-cluster",
+    "messages": [{"role": "user", "content": "Explain MoE routing in one paragraph."}]
+  }'
+```
+
+Same **no-cap rule** as the rest of this repo: omit `max_tokens` so output isn't
+silently truncated.
 
 ---
 
@@ -353,7 +483,7 @@ draft acceptance = 0.355 (116 accepted / 327 generated), mean acceptance length 
 | Empty `content` in chat response | Gemma 4 has thinking enabled; reasoning may occupy the token budget. Raise `max_tokens` or disable thinking in the request. |
 | `failed to measure draft model memory` warning at startup | Harmless — the drafter still loads and works. |
 | Want CPU-only | Replace `-ngl 999` with `-ngl 0`. |
-| llama-swap web UI at `/` shows *"Server unavailable / 404"* | The bundled UI probes `/props` with `autoload=false`, which 404s when no model is loaded. Open `http://localhost:8080/upstream/<model>/` instead (e.g. `gemma-4-e4b-generic`) — it loads the model on demand. The `/v1/*` API works regardless. |
+| llama-swap web UI at `/` shows *"Server unavailable / 404"* | The bundled UI probes `/props` with `autoload=false`, which 404s when no model is loaded. Open `http://localhost:8090/upstream/<model>/` instead (e.g. `gemma-4-e4b-generic`) — it loads the model on demand. The `/v1/*` API works regardless. |
 | llama-swap: `404` routing a request | The `model` field must match a configured name (`gemma-4-e4b-summary`, `gemma-4-e4b-generic`, or alias `gemma-4-e4b`). A missing/unknown `model` 404s. |
 
 ---
@@ -362,8 +492,13 @@ draft acceptance = 0.355 (116 accepted / 327 generated), mean acceptance length 
 
 | File | Purpose |
 |---|---|
-| `download-gemma4-e4b-mtp.sh` | Downloads target model + MTP drafter |
-| `llama-swap.yaml` | llama-swap config: summary + generic models, idle auto-unload |
-| `serve-llama-swap.sh` | Launches llama-swap in front of llama-server |
+| `download-gemma4-e4b-mtp.sh` | Downloads target model + MTP drafter (single-machine Gemma) |
+| `llama-swap.yaml` | llama-swap config: summary + generic + code models, idle auto-unload |
+| `serve-llama-swap.sh` | Launches llama-swap in front of llama-server (port 8090) |
+| `download-qwen3-30b-a3b.sh` | Downloads Qwen3-30B-A3B GGUF for the cluster (main node) |
+| `fetch-llamacpp-rpc.sh` | Downloads the pinned (b9701) RPC-enabled llama.cpp build for this node |
+| `start-rpc-worker.sh` | Starts the RPC worker (`rpc-server`) on a non-Mac node |
+| `serve-qwen3-cluster.sh` | Launches Qwen3-30B-A3B split across the cluster (main node, port 8090) |
+| `.github/workflows/build-llamacpp-rpc.yml` | CI: builds llama.cpp b9701 (+RPC) for all node platforms |
 | `models/` | Downloaded GGUF files |
 | `README.md` | This document |

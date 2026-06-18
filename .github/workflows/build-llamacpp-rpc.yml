@@ -1,0 +1,135 @@
+# Build llama.cpp with RPC enabled, pinned to one tag, for every node platform.
+#
+# Why this exists: distributed inference over llama.cpp RPC requires that EVERY
+# node run the *identical* build (same source commit + flags), or the RPC
+# protocol mismatches and crashes. The upstream prebuilt releases also do not
+# ship `rpc-server` / are not built with -DGGML_RPC=ON. So we build it ourselves,
+# once, from a pinned tag, for all three node platforms, and publish the binaries
+# as a GitHub Release the nodes download with `fetch-llamacpp-rpc.sh`.
+#
+# Trigger manually: Actions tab -> "build-llamacpp-rpc" -> Run workflow
+#   or: gh workflow run build-llamacpp-rpc.yml -f tag=b9701
+#
+# amd64 and arm64 are both little-endian and the RPC wire format is fixed-width,
+# so a single tag built per-OS is cross-platform compatible.
+
+name: build-llamacpp-rpc
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "llama.cpp git tag to build (e.g. b9701)"
+        required: true
+        default: "b9701"
+
+permissions:
+  contents: write   # needed to publish the Release
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64-metal
+            runs-on: macos-15
+            # Apple Silicon: Metal + embed the shader lib so the binary is
+            # self-contained (no external default.metallib to ship).
+            cmake_flags: "-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF"
+          - name: linux-amd64-cpu
+            runs-on: ubuntu-latest
+            cmake_flags: "-DGGML_RPC=ON -DLLAMA_CURL=OFF"
+          - name: windows-amd64-cpu
+            runs-on: windows-latest
+            cmake_flags: "-DGGML_RPC=ON -DLLAMA_CURL=OFF"
+
+    steps:
+      - name: Checkout llama.cpp at pinned tag
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: ${{ inputs.tag }}
+          path: llama.cpp
+
+      - name: Configure
+        run: >
+          cmake -S llama.cpp -B llama.cpp/build
+          -DCMAKE_BUILD_TYPE=Release
+          -DLLAMA_BUILD_SERVER=ON
+          ${{ matrix.cmake_flags }}
+
+      - name: Build (llama-server + rpc-server)
+        run: cmake --build llama.cpp/build --config Release --target llama-server rpc-server -j
+
+      # Collect binaries + their shared libs into a flat staging dir. Build
+      # output layout differs between single-config (Unix) and multi-config
+      # (MSVC, which nests under Release/), so handle both.
+      - name: Stage artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          STAGE="stage/llama-${{ inputs.tag }}-${{ matrix.name }}"
+          mkdir -p "$STAGE"
+          BIN=llama.cpp/build/bin
+          cp "$BIN/llama-server" "$BIN/rpc-server" "$STAGE/"
+          # Bundle any shared libs the binaries link against (ggml/llama .so/.dylib).
+          find "$BIN" -maxdepth 1 \( -name '*.dylib' -o -name '*.so' \) -exec cp {} "$STAGE/" \; || true
+          git -C llama.cpp rev-parse HEAD > "$STAGE/BUILD_COMMIT.txt"
+          echo "tag=${{ inputs.tag }} platform=${{ matrix.name }}" >> "$STAGE/BUILD_COMMIT.txt"
+
+      - name: Stage artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $stage = "stage/llama-${{ inputs.tag }}-${{ matrix.name }}"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          $bin = "llama.cpp/build/bin/Release"
+          Copy-Item "$bin/llama-server.exe","$bin/rpc-server.exe" $stage
+          Get-ChildItem "$bin" -Filter *.dll | Copy-Item -Destination $stage
+          (git -C llama.cpp rev-parse HEAD) | Out-File -Encoding ascii "$stage/BUILD_COMMIT.txt"
+          "tag=${{ inputs.tag }} platform=${{ matrix.name }}" | Out-File -Append -Encoding ascii "$stage/BUILD_COMMIT.txt"
+
+      - name: Zip artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd stage
+          DIR="llama-${{ inputs.tag }}-${{ matrix.name }}"
+          # Cross-platform zip: GitHub runners (incl. Windows) ship 7z/zip.
+          if command -v zip >/dev/null 2>&1; then
+            zip -r "../${DIR}.zip" "$DIR"
+          else
+            7z a "../${DIR}.zip" "$DIR"
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-${{ inputs.tag }}-${{ matrix.name }}
+          path: llama-${{ inputs.tag }}-${{ matrix.name }}.zip
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish/refresh the pinned Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: llamacpp-rpc-${{ inputs.tag }}
+          name: "llama.cpp ${{ inputs.tag }} (RPC) binaries"
+          body: >
+            llama.cpp built from tag `${{ inputs.tag }}` with `-DGGML_RPC=ON`
+            for all cluster node platforms. Every node must run the same build.
+            Verify the matching `BUILD_COMMIT.txt` inside each zip is identical.
+          files: dist/*.zip

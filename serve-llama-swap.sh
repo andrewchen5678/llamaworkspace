@@ -6,9 +6,9 @@
 # transparently.
 #
 # Usage:
-#   ./serve-llama-swap.sh                 # listen on 127.0.0.1:8080
+#   ./serve-llama-swap.sh                 # listen on 127.0.0.1:8090
 #   ./serve-llama-swap.sh 127.0.0.1:9090  # custom listen address
-#   LISTEN=0.0.0.0:8080 ./serve-llama-swap.sh
+#   LISTEN=0.0.0.0:8090 ./serve-llama-swap.sh
 #
 # Send requests to the listen address; name the model in the body:
 #   "model": "gemma-4-e4b"
@@ -19,7 +19,7 @@ set -euo pipefail
 # (./models/...) resolve correctly regardless of where it's invoked from.
 cd "$(dirname "$0")"
 
-LISTEN="${1:-${LISTEN:-127.0.0.1:8080}}"
+LISTEN="${1:-${LISTEN:-127.0.0.1:8090}}"
 CONFIG="${CONFIG:-./llama-swap.yaml}"
 
 if ! command -v llama-swap >/dev/null 2>&1; then
