@@ -103,10 +103,16 @@ echo
 # local device + every --rpc worker, and allocates each layer's KV cache on the
 # node that holds it — so the KV cache is distributed across the cluster, not
 # duplicated. --tensor-split sets the proportions; omitted, it splits by memory.
+#
+# -fit off disables llama.cpp's auto-fit ("fitting params to device memory"),
+# which otherwise re-distributes layers to fill free memory and can override the
+# --tensor-split / -ngl we set. This cluster places the model deliberately, so we
+# make our numbers authoritative rather than letting auto-fit second-guess them.
 exec "$LLAMA_SERVER" \
   -m "$MODEL" \
   --rpc "$RPC_WORKERS" \
   --split-mode layer \
+  -fit off \
   "${SPLIT[@]}" \
   -ngl 999 \
   -c "$CTX" \

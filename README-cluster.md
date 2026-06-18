@@ -141,6 +141,40 @@ per-layer KV cache, so each node holds the KV only for its own layers (the cache
 is distributed across the cluster, not duplicated). Omit `TENSOR_SPLIT` to let
 llama.cpp auto-distribute proportionally by memory.
 
+> **Omitting `TENSOR_SPLIT` splits by *weights* only.** With `-fit off` (which this
+> script sets so your split is authoritative), the default no-split distribution
+> weighs each device by reported free memory but reserves **no** headroom for the
+> KV cache or compute buffers — auto-fit, which would account for those, is off. So
+> on a node that's tight on memory the default can over-commit and fail at
+> allocation; set an explicit `TENSOR_SPLIT` to bias layers off it.
+
+### Keeping the main node (your workstation) light
+
+The first `--tensor-split` value is the **local (Mac) share**. Lower it to keep
+the model off your workstation and push it onto the workers:
+
+```bash
+# Mac holds ~10% of layers+KV; workers carry the rest
+RPC_WORKERS=192.168.1.20:50052,192.168.1.30:50052 \
+TENSOR_SPLIT=10,45,45 \
+  ./serve-qwen3-cluster.sh
+
+# Mac holds zero model layers (it just reads the GGUF and serves)
+TENSOR_SPLIT=0,55,45 ...   # trades away all Metal compute → slowest, lightest on Mac
+```
+
+**Measuring it correctly (macOS).** Don't trust `ps`/`top` **RSS** or Activity
+Monitor's "Real Mem" — the main node `mmap`s the entire GGUF to stream weights to
+the workers, so RSS shows ~the full model size (~22 GB) *regardless* of the split.
+That mapping is clean, file-backed, and reclaimable — not real memory pressure.
+Watch the **physical footprint** instead (Activity Monitor's "Memory" column, or
+`vmmap --summary <pid> | grep 'Physical footprint'`); that's where the split
+actually shows up. At `10,45,45` the Mac's physical footprint is ~2.7 GB.
+
+> `serve-qwen3-cluster.sh` passes `-fit off` so your `--tensor-split` is
+> authoritative. With llama.cpp's auto-fit (`-fit on`, the default) the load can
+> hang at `fitting params to device memory ...` and/or override your split.
+
 ## 6. Send a request
 
 ```bash
