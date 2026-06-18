@@ -1,33 +1,32 @@
 #!/usr/bin/env bash
 #
-# download-gemma4-e4b-mtp.sh
+# download-qwen3-30b-a3b.sh
 #
-# Downloads Gemma 4 E4B (QAT GGUF) + its MTP drafter for llama.cpp
-# speculative decoding.
+# Downloads Qwen3-30B-A3B (MoE GGUF) for the distributed (cluster) setup.
 #
-# Gemma 4 does NOT use a separate sibling draft model. It ships a tiny
-# Multi-Token Prediction (MTP) "drafter" (~60 MB) that shares the target's
-# KV-cache. The target verifies every drafted token, so output is identical
-# to running without it — just faster. Activated with `--spec-type draft-mtp`.
+# Run this on the MAIN node only. With llama.cpp RPC the main node reads the
+# model file and streams the weights to the worker rpc-servers at load time, so
+# the workers do NOT need their own copy.
 #
-# Requires a llama.cpp build from 2026-06-07 or later (MTP merged in PR #23398).
+# Qwen3-30B-A3B is a Mixture-of-Experts model: ~30B total parameters, ~3B active
+# per token. There is no separate draft model / MTP drafter — it's a single GGUF.
 #
 # Usage:
-#   ./download-gemma4-e4b-mtp.sh [TARGET_DIR]
+#   ./download-qwen3-30b-a3b.sh [TARGET_DIR]
 #
 # Environment overrides:
-#   MODEL_QUANT  main-model quant file (default: UD-Q4_K_XL; also: UD-Q2_K_XL)
-#   HF_REPO      source repo          (default: unsloth/gemma-4-E4B-it-qat-GGUF)
+#   MODEL_QUANT  quant file (default: UD-Q4_K_XL ~18 GB; also: UD-Q8_K_XL, etc.)
+#   HF_REPO      source repo (default: unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF)
+#                For thinking-on, use unsloth/Qwen3-30B-A3B-Thinking-2507-GGUF.
 
 set -euo pipefail
 
 # ---- configuration ---------------------------------------------------------
 TARGET_DIR="${1:-./models}"
-HF_REPO="${HF_REPO:-unsloth/gemma-4-E4B-it-qat-GGUF}"
+HF_REPO="${HF_REPO:-unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF}"
 MODEL_QUANT="${MODEL_QUANT:-UD-Q4_K_XL}"
 
-MODEL_FILE="gemma-4-E4B-it-qat-${MODEL_QUANT}.gguf"
-MTP_FILE="mtp-gemma-4-E4B-it.gguf"
+MODEL_FILE="Qwen3-30B-A3B-Instruct-2507-${MODEL_QUANT}.gguf"
 
 HF_ENDPOINT="${HF_ENDPOINT:-https://huggingface.co}"
 
@@ -70,35 +69,31 @@ download() {
 
 # ---- main ------------------------------------------------------------------
 log "Repo        : $HF_REPO"
-log "Main model  : $MODEL_FILE"
-log "MTP drafter : $MTP_FILE"
+log "Model       : $MODEL_FILE"
 log "Destination : $TARGET_DIR"
 echo
 
 download "$HF_REPO" "$MODEL_FILE" "$TARGET_DIR"
-download "$HF_REPO" "$MTP_FILE"   "$TARGET_DIR"
 
 echo
-log "Done. Run llama.cpp with MTP speculative decoding:"
+log "Done. Run the cluster from the main node (workers via ./start-rpc-worker.sh):"
 cat <<EOF
 
-  # Explicit (works on any MTP-capable build):
-  llama-server \\
-    -m            "${TARGET_DIR}/${MODEL_FILE}" \\
-    --model-draft "${TARGET_DIR}/${MTP_FILE}" \\
-    --spec-type draft-mtp \\
-    --spec-draft-n-max 4 \\
-    -ngl 999 -fa off \\
+  RPC_WORKERS=<WORKER1_IP>:50052,<WORKER2_IP>:50052 ./serve-qwen3-cluster.sh
+
+  # ...which runs the equivalent of:
+  ./llama.cpp/bin/llama-server \
+    -m "${TARGET_DIR}/${MODEL_FILE}" \
+    --rpc <WORKER1_IP>:50052,<WORKER2_IP>:50052 \
+    -ngl 999 -c 16384 \
+    --alias qwen3-30b-a3b-cluster \
     --host 127.0.0.1 --port 8090
 
-  # Or let a recent build auto-discover the drafter straight from HF:
-  llama-server -hf ${HF_REPO}:${MODEL_QUANT} \\
-    --spec-type draft-mtp --spec-draft-n-max 4 -ngl 999 -fa off
-
 Notes:
-  * Requires llama.cpp from 2026-06-07 or later (MTP merge, PR #23398).
-  * --spec-draft-n-max  = max tokens the drafter proposes per step (try 3-6).
-  * -ngl 999            = offload all layers to GPU; drop for CPU-only.
-  * Add mmproj-F16.gguf via --mmproj for image/audio (multimodal) input.
+  * Main node only — workers stream the weights over RPC; no local copy needed.
+  * --rpc takes one comma-separated endpoint per worker.
+  * Add --tensor-split A,B,C (maps to [local, worker1, worker2]) to bias the
+    layer split by each node's free RAM. Omit it to auto-distribute.
+  * All nodes must run the SAME llama.cpp build (see ./fetch-llamacpp-rpc.sh).
 
 EOF

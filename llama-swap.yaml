@@ -6,10 +6,10 @@
 #
 # Run it from the project root (paths below are relative to this directory):
 #   cd /Users/it3/codes/andrew/llamaworkspace
-#   llama-swap -config ./llama-swap.yaml -listen 127.0.0.1:8080
+#   llama-swap -config ./llama-swap.yaml -listen 127.0.0.1:8090
 # Add -watch-config to hot-reload this file on save.
 #
-# Then send requests to http://127.0.0.1:8080 exactly as before, but the JSON
+# Then send requests to http://127.0.0.1:8090 exactly as before, but the JSON
 # body must name the model so llama-swap knows which one to route to:
 #   "model": "gemma-4-e4b-summary"   # deterministic summarization (primary)
 #   "model": "gemma-4-e4b-generic"   # general-purpose chat / generation
