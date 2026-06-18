@@ -127,6 +127,7 @@ which runs the equivalent of:
 ./llama.cpp/bin/llama-server \
   -m ./models/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf \
   --rpc 192.168.1.20:50052,192.168.1.30:50052 \
+  --split-mode layer \
   -ngl 999 -c 262144 --jinja \
   --tensor-split 32,32,16 \
   --alias qwen3.5-35b-a3b-cluster \
@@ -134,8 +135,11 @@ which runs the equivalent of:
 ```
 
 `--tensor-split` values map to `[local device, then each --rpc endpoint in
-order]` — here `32,32,16` weights the layer split by each node's free RAM. Omit
-`TENSOR_SPLIT` to let llama.cpp auto-distribute proportionally.
+order]` — here `32,32,16` weights the layer split by each node's free RAM. In the
+default `layer` split mode this governs **both** the layer weights and the
+per-layer KV cache, so each node holds the KV only for its own layers (the cache
+is distributed across the cluster, not duplicated). Omit `TENSOR_SPLIT` to let
+llama.cpp auto-distribute proportionally by memory.
 
 ## 6. Send a request
 

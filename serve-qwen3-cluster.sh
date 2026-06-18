@@ -73,7 +73,9 @@ fi
 # Qwen3.5-35B-A3B recommended general sampling (thinking ON, generic use).
 SAMPLING=(--temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 1.5)
 
-# --tensor-split is optional; only pass it when TENSOR_SPLIT is set.
+# --tensor-split is optional; only pass it when TENSOR_SPLIT is set. In layer
+# split mode its proportions govern BOTH the layer weights and the per-layer KV
+# cache, so it's the single lever for biasing memory away from a tight node.
 SPLIT=()
 if [[ -n "${TENSOR_SPLIT:-}" ]]; then
   SPLIT=(--tensor-split "$TENSOR_SPLIT")
@@ -97,9 +99,14 @@ echo
 # --jinja uses the GGUF's embedded chat template, which drives Qwen3.5's
 # thinking/non-thinking split and tool-call parsing (and enables future
 # --chat-template-kwargs toggling).
+# -sm layer (the default, made explicit) splits the model layer-wise across the
+# local device + every --rpc worker, and allocates each layer's KV cache on the
+# node that holds it — so the KV cache is distributed across the cluster, not
+# duplicated. --tensor-split sets the proportions; omitted, it splits by memory.
 exec "$LLAMA_SERVER" \
   -m "$MODEL" \
   --rpc "$RPC_WORKERS" \
+  --split-mode layer \
   "${SPLIT[@]}" \
   -ngl 999 \
   -c "$CTX" \
