@@ -62,7 +62,12 @@ jobs:
           ${{ matrix.cmake_flags }}
 
       - name: Build (llama-server + rpc-server)
-        run: cmake --build llama.cpp/build --config Release --target llama-server rpc-server -j
+        # Cap parallelism with an explicit job count. A bare `-j` (no number)
+        # means *unlimited* jobs for the Unix Makefiles generator, which spawns
+        # one compile per ready source file at once and OOM-kills the small
+        # 2-vCPU / 7 GB runner when the big TUs (httplib.cpp, llama.cpp) collide.
+        # 2 matches the runner's core count, so it's no slower in practice.
+        run: cmake --build llama.cpp/build --config Release --target llama-server rpc-server --parallel 2
 
       # Collect binaries + their shared libs into a flat staging dir. Build
       # output layout differs between single-config (Unix) and multi-config
