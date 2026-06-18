@@ -36,24 +36,34 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          # These binaries run on OTHER machines, so they must NOT be compiled with
-          # -march=native (GGML_NATIVE's default ON), which bakes in the *build
-          # runner's* ISA. A GitHub runner CPU has newer instructions (e.g.
-          # AVX-512) than an older target like a Coffee Lake i5; such a binary
-          # crashes immediately with an illegal instruction (Windows exit
-          # 0xC000001D). So GGML_NATIVE=OFF everywhere, and on x86 add
-          # GGML_CPU_ALL_VARIANTS (needs GGML_BACKEND_DL): this builds one ggml-cpu
-          # library per ISA level (sse42/avx/avx2/avx512/...) and loads the best
-          # one the running CPU supports at startup — i.e. one binary works on ANY
-          # x86 box, oldest to newest. (Apple Silicon is a single arm64 baseline.)
+          # Two independent portability concerns, both required:
+          #
+          # 1. ISA portability. These binaries run on OTHER machines, so they must
+          #    NOT be compiled with -march=native (GGML_NATIVE's default ON), which
+          #    bakes in the *build runner's* ISA. A GitHub runner CPU has newer
+          #    instructions (e.g. AVX-512) than an older target like a Coffee Lake
+          #    i5; such a binary crashes immediately with an illegal instruction
+          #    (Windows exit 0xC000001D). So GGML_NATIVE=OFF everywhere, and on x86
+          #    add GGML_CPU_ALL_VARIANTS (needs GGML_BACKEND_DL): this builds one
+          #    ggml-cpu library per ISA level (sse42/avx/avx2/avx512/...) and loads
+          #    the best one the running CPU supports at startup — one binary works
+          #    on ANY x86 box. (Apple Silicon is a single arm64 baseline.)
+          #
+          # 2. Library loading. The binaries and their shared libs ship flat in one
+          #    directory (and BACKEND_DL adds the per-ISA variant libs to it).
+          #    Linux/macOS loaders don't search a binary's own dir by default, so we
+          #    bake an origin-relative rpath ($ORIGIN / @loader_path) into every
+          #    executable AND shared lib at link time — self-locating, no
+          #    LD_LIBRARY_PATH. Windows already searches the executable's own
+          #    directory, so it needs no rpath flag.
           - name: macos-arm64-metal
             runs-on: macos-15
             # Apple Silicon: Metal + embed the shader lib so the binary is
             # self-contained (no external default.metallib to ship).
-            cmake_flags: "-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF"
+            cmake_flags: "-DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH=@loader_path"
           - name: linux-amd64-cpu
             runs-on: ubuntu-latest
-            cmake_flags: "-DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF"
+            cmake_flags: "-DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH='$ORIGIN'"
           - name: windows-amd64-cpu
             runs-on: windows-latest
             cmake_flags: "-DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF"
@@ -92,8 +102,12 @@ jobs:
           mkdir -p "$STAGE"
           BIN=llama.cpp/build/bin
           cp "$BIN/llama-server" "$BIN/rpc-server" "$STAGE/"
-          # Bundle any shared libs the binaries link against (ggml/llama .so/.dylib).
-          find "$BIN" -maxdepth 1 \( -name '*.dylib' -o -name '*.so' \) -exec cp {} "$STAGE/" \; || true
+          # Bundle every shared lib the binaries link against. -L dereferences
+          # symlinks so we materialize real files. The '*.so.*' pattern is
+          # essential: the binaries' SONAME is versioned (e.g. libggml.so.0), and
+          # matching only '*.so' would copy just the unversioned dev symlink,
+          # leaving the loader unable to find libggml.so.0 at runtime.
+          find "$BIN" -maxdepth 1 \( -name '*.dylib' -o -name '*.so' -o -name '*.so.*' \) -exec cp -L {} "$STAGE/" \; || true
           git -C llama.cpp rev-parse HEAD > "$STAGE/BUILD_COMMIT.txt"
           echo "tag=${{ inputs.tag }} platform=${{ matrix.name }}" >> "$STAGE/BUILD_COMMIT.txt"
 
