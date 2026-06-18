@@ -36,6 +36,37 @@ RELEASE_TAG="llamacpp-rpc-${LLAMACPP_TAG}"
 log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 err() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; }
 
+# Resolve owner/repo without needing gh: honor GH_REPO, else parse the git remote.
+resolve_repo() {
+  if [[ -n "${GH_REPO:-}" ]]; then
+    echo "$GH_REPO"
+    return 0
+  fi
+  local url
+  url="$(git remote get-url origin 2>/dev/null || true)"
+  if [[ -z "$url" ]]; then
+    err "Can't determine the repo. Set GH_REPO=owner/repo and re-run."
+    exit 1
+  fi
+  url="${url#git@github.com:}"
+  url="${url#https://github.com/}"
+  url="${url#http://github.com/}"
+  echo "${url%.git}"
+}
+
+# Download a URL to a file with curl or wget. Returns non-zero on any failure
+# (HTTP error, no downloader) so the caller can fall back.
+download_url() {
+  local url="$1" dest="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL --retry 3 -o "$dest" "$url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "$dest" "$url"
+  else
+    return 2
+  fi
+}
+
 # Map this machine to the artifact built for it by the workflow matrix.
 detect_platform() {
   local os arch
@@ -56,12 +87,8 @@ detect_platform() {
 PLATFORM="$(detect_platform)"
 ZIP="llama-${LLAMACPP_TAG}-${PLATFORM}.zip"
 
-if ! command -v gh >/dev/null 2>&1; then
-  err "Need the GitHub CLI (gh) to download from a private Release: https://cli.github.com"
-  exit 1
-fi
-
-GH_REPO="${GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
+GH_REPO="$(resolve_repo)"
+ASSET_URL="https://github.com/${GH_REPO}/releases/download/${RELEASE_TAG}/${ZIP}"
 
 log "Repo        : $GH_REPO"
 log "Release     : $RELEASE_TAG"
@@ -74,8 +101,21 @@ mkdir -p "$LLAMACPP_DIR"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-log "Downloading $ZIP from release $RELEASE_TAG"
-gh release download "$RELEASE_TAG" --repo "$GH_REPO" --pattern "$ZIP" --dir "$TMP" --clobber
+# Public releases download over plain HTTPS — no gh, no auth. Fall back to gh
+# only if the direct download fails (e.g. the Release is private).
+log "Downloading $ZIP from $ASSET_URL"
+if ! download_url "$ASSET_URL" "$TMP/$ZIP"; then
+  if command -v gh >/dev/null 2>&1; then
+    log "Direct download failed; retrying via gh (handles private Releases / SSO)"
+    gh release download "$RELEASE_TAG" --repo "$GH_REPO" --pattern "$ZIP" --dir "$TMP" --clobber
+  else
+    err "Could not download $ZIP."
+    err "  URL: $ASSET_URL"
+    err "  If the Release is private, install gh (https://cli.github.com) or set GH_TOKEN."
+    err "  Otherwise check LLAMACPP_TAG ($LLAMACPP_TAG) and that the asset exists."
+    exit 1
+  fi
+fi
 
 log "Extracting"
 # The zip contains a top-level dir (llama-<tag>-<platform>/); flatten it into

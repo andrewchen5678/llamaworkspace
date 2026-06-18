@@ -25,8 +25,8 @@ behavior identical across the single-machine and cluster setups.
 | Requirement | Notes |
 |---|---|
 | CI-built `llama-server` in `./llama.cpp/bin` | Fetch with `./fetch-llamacpp-rpc.sh` (auto-detects platform). Bundles MTP (`--spec-type draft-mtp`) + RPC. |
-| `wget` or `curl` | For the model download scripts. |
-| GitHub CLI (`gh`) | For `./fetch-llamacpp-rpc.sh` to pull the private build Release. |
+| `wget` or `curl` | For the model + binary download scripts (the public Release downloads over HTTPS — no auth). |
+| GitHub CLI (`gh`) | *Optional.* Only a fallback if the Release is private, and for triggering the build workflow from the terminal. |
 
 ```bash
 ./fetch-llamacpp-rpc.sh                  # fetch the pinned build into ./llama.cpp/bin

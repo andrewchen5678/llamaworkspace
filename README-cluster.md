@@ -49,8 +49,10 @@ publishes them to a Release tagged `llamacpp-rpc-b9701`:
 ./fetch-llamacpp-rpc.sh        # auto-detects platform, extracts to ./llama.cpp/bin
 ```
 
-Needs the GitHub CLI (`gh`) for the private Release. On **Windows**, download the
-`llama-b9701-windows-amd64-cpu-rpc.zip` asset from the Release page manually and
+Downloads the asset over plain HTTPS from the public Release — **no `gh`, no auth**
+(it derives `owner/repo` from the git remote; override with `GH_REPO`). If the
+Release is private it falls back to `gh` when installed. On **Windows**, download
+the `llama-b9701-windows-amd64-cpu-rpc.zip` asset from the Release page manually and
 extract it to `.\llama.cpp\bin`. Each artifact contains a `BUILD_COMMIT.txt` —
 confirm it's **identical on every node**.
 
