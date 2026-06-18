@@ -41,6 +41,22 @@ if [[ ! -x "$RPC_SERVER" ]]; then
   exit 1
 fi
 
+# Preflight: the Linux CI binary links libgomp (OpenMP); minimal installs lack
+# it, so exec'ing would fail with a cryptic "libgomp.so.1: cannot open shared
+# object file". Catch any missing shared lib here with a fix-it hint instead.
+if command -v ldd >/dev/null 2>&1; then
+  missing="$(ldd "$RPC_SERVER" 2>/dev/null | awk '/not found/ {print $1}')"
+  if [[ -n "$missing" ]]; then
+    err "rpc-server is missing shared libraries:"
+    printf '       %s\n' $missing >&2
+    err "Install the OpenMP runtime your distro ships it in:"
+    err "  Debian/Ubuntu : sudo apt-get install -y libgomp1"
+    err "  Fedora/RHEL   : sudo dnf install -y libgomp"
+    err "  Alpine        : sudo apk add libgomp"
+    exit 1
+  fi
+fi
+
 log "Starting RPC worker on ${RPC_HOST}:${RPC_PORT}"
 log "Binary: $RPC_SERVER"
 log "Reminder: trusted LAN/VPN only — this endpoint has no authentication."

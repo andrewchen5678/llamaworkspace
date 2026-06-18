@@ -26,6 +26,7 @@ behavior identical across the single-machine and cluster setups.
 |---|---|
 | CI-built `llama-server` in `./llama.cpp/bin` | Fetch with `./fetch-llamacpp-rpc.sh` (auto-detects platform). Bundles MTP (`--spec-type draft-mtp`) + RPC. |
 | `wget` or `curl` | For the model + binary download scripts (the public Release downloads over HTTPS — no auth). |
+| OpenMP runtime (`libgomp`) — **Linux nodes only** | The Linux CI binary links it; minimal installs lack it and fail with `libgomp.so.1: cannot open shared object file`. Install: `apt-get install libgomp1` (Debian/Ubuntu), `dnf install libgomp` (Fedora/RHEL), `apk add libgomp` (Alpine). macOS/Windows builds don't need it. |
 | GitHub CLI (`gh`) | *Optional.* Only a fallback if the Release is private, and for triggering the build workflow from the terminal. |
 
 ```bash
