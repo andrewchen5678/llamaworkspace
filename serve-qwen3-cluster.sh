@@ -37,7 +37,10 @@ PORT="${PORT:-8090}"
 HOST="${HOST:-127.0.0.1}"
 # Qwen3.5-35B-A3B's native context length (262144 = 256K). Extensible to ~1M with
 # YaRN, but that needs explicit RoPE-scaling flags; the native max is the ceiling
-# here. A full 256K KV cache is large — lower CTX if a node runs out of memory.
+# here. The KV cache for 256K is large in aggregate, but llama.cpp allocates it
+# per layer on the node holding that layer, so it's split across the cluster (not
+# duplicated) — bias --tensor-split toward roomier nodes, or lower CTX, if a node
+# runs out of memory.
 CTX="${CTX:-262144}"
 MODEL="${MODEL:-./models/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf}"
 LLAMACPP_DIR="${LLAMACPP_DIR:-./llama.cpp/bin}"
