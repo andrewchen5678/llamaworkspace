@@ -51,10 +51,15 @@ publishes them to a Release tagged `llamacpp-rpc-b9701`:
 
 Downloads the asset over plain HTTPS from the public Release — **no `gh`, no auth**
 (it derives `owner/repo` from the git remote; override with `GH_REPO`). If the
-Release is private it falls back to `gh` when installed. On **Windows**, download
-the `llama-b9701-windows-amd64-cpu-rpc.zip` asset from the Release page manually and
-extract it to `.\llama.cpp\bin`. Each artifact contains a `BUILD_COMMIT.txt` —
-confirm it's **identical on every node**.
+Release is private it falls back to `gh` when installed. On **Windows**, run the
+PowerShell equivalent instead:
+
+```powershell
+.\fetch-llamacpp-rpc.ps1        # pulls llama-b9701-windows-amd64-cpu.zip into .\llama.cpp\bin
+```
+
+Each artifact contains a `BUILD_COMMIT.txt` — confirm it's **identical on every
+node**.
 
 ## 3. Download the model (main node only)
 
@@ -72,6 +77,20 @@ sampling); to run non-thinking, add
 
 ```bash
 ./start-rpc-worker.sh          # listens on 0.0.0.0:50052
+```
+
+On **Windows** workers, use the PowerShell script instead:
+
+```powershell
+.\start-rpc-worker.ps1         # listens on 0.0.0.0:50052
+```
+
+First run on Windows: open the port through the firewall once, from an elevated
+PowerShell:
+
+```powershell
+New-NetFirewallRule -DisplayName "llama.cpp RPC worker" `
+  -Direction Inbound -Action Allow -Protocol TCP -LocalPort 50052
 ```
 
 > **Security:** the RPC server has no authentication. Bind it only on a trusted

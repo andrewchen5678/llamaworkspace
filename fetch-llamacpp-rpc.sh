@@ -13,9 +13,8 @@
 # `llamacpp-rpc-<tag>` Release; this script just pulls the matching zip so all
 # nodes are guaranteed to match.
 #
-# Windows nodes: there is no bash here — download the
-# `llama-<tag>-windows-amd64-cpu-rpc.zip` asset manually from the Release page
-# and extract it to .\llama.cpp\bin (see README).
+# Windows nodes: there is no bash here — use the PowerShell port instead:
+#   .\fetch-llamacpp-rpc.ps1   (pulls llama-<tag>-windows-amd64-cpu.zip)
 #
 # Usage:
 #   ./fetch-llamacpp-rpc.sh
