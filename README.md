@@ -13,18 +13,27 @@ those tokens faster.
 
 ## Requirements
 
+**Every workflow in this repo — the single-machine Gemma setup *and* the cluster —
+runs the same CI-built `llama-server`**: the binary produced by the GitHub Action
+and fetched into `./llama.cpp/bin` by `./fetch-llamacpp-rpc.sh`. It is pinned to tag
+`b9701`, built with Metal + RPC, and is newer than the MTP merge
+([PR #23398](https://github.com/ggml-org/llama.cpp/pull/23398)), so `--spec-type
+draft-mtp` works out of the box. Using one binary everywhere keeps behavior
+identical across the single-machine and cluster setups.
+
 | Requirement | Notes |
 |---|---|
-| llama.cpp build **≥ 2026-06-07** | MTP merged in [PR #23398](https://github.com/ggml-org/llama.cpp/pull/23398). Check with `llama-server --version` (needs build ≥ b9600-ish). |
-| `--spec-type draft-mtp` flag | Verify: `llama-server --help \| grep spec-type` |
-| `wget` or `curl` | For the download script. |
-
-Install / update llama.cpp on macOS:
+| CI-built `llama-server` in `./llama.cpp/bin` | Fetch with `./fetch-llamacpp-rpc.sh` (auto-detects platform). Bundles MTP (`--spec-type draft-mtp`) + RPC. |
+| `wget` or `curl` | For the model download script. |
 
 ```bash
-brew install llama.cpp      # or: brew upgrade llama.cpp
-llama-server --version      # confirm build date / number
+./fetch-llamacpp-rpc.sh                  # fetch the pinned build into ./llama.cpp/bin
+./llama.cpp/bin/llama-server --version   # confirm the build number
 ```
+
+> **Custom builds:** use a Homebrew or self-compiled `llama-server` only if you need
+> an optimization the CI binary doesn't carry. If you do, point the commands below at
+> it — and run that *same* build on every cluster node (RPC requires identical builds).
 
 ---
 
@@ -57,7 +66,7 @@ MODEL_QUANT=UD-Q2_K_XL ./download-gemma4-e4b-mtp.sh ./models
 ## 2. Run the server (with MTP speculative decoding)
 
 ```bash
-llama-server \
+./llama.cpp/bin/llama-server \
   -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
   --model-draft ./models/mtp-gemma-4-E4B-it.gguf \
   --spec-type draft-mtp \
@@ -85,7 +94,7 @@ Then open the web UI at <http://127.0.0.1:8090> or send API requests (below).
 root automatically — no separate download needed):
 
 ```bash
-llama-server -hf unsloth/gemma-4-E4B-it-qat-GGUF:UD-Q4_K_XL \
+./llama.cpp/bin/llama-server -hf unsloth/gemma-4-E4B-it-qat-GGUF:UD-Q4_K_XL \
   --spec-type draft-mtp --spec-draft-n-max 4 \
   -ngl 999 -fa off -c 16384
 ```
@@ -95,7 +104,7 @@ llama-server -hf unsloth/gemma-4-E4B-it-qat-GGUF:UD-Q4_K_XL \
 Just omit the draft flags:
 
 ```bash
-llama-server -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
+./llama.cpp/bin/llama-server -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
   -ngl 999 -fa off -c 16384 --host 127.0.0.1 --port 8090
 ```
 
@@ -175,7 +184,7 @@ larger context (and remember the prompt plus the full generation must fit
 inside `-c`):
 
 ```bash
-llama-server -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
+./llama.cpp/bin/llama-server -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
   --model-draft ./models/mtp-gemma-4-E4B-it.gguf \
   --spec-type draft-mtp --spec-draft-n-max 4 \
   -ngl 999 -fa off -c 16384 \
@@ -479,7 +488,7 @@ draft acceptance = 0.355 (116 accepted / 327 generated), mean acceptance length 
 
 | Symptom | Cause / fix |
 |---|---|
-| `error: invalid argument: --spec-type` | llama.cpp too old. `brew upgrade llama.cpp`. |
+| `error: invalid argument: --spec-type` | `llama-server` predates MTP. Re-fetch the CI build: `./fetch-llamacpp-rpc.sh` (or run `./llama.cpp/bin/llama-server`, not a stale one on `PATH`). |
 | Download stalls partway | Re-run the script — `wget --continue` resumes. |
 | `llama-cli` hangs forever printing `> ` | `llama-cli` enters interactive mode and spins on EOF even with `-no-cnv`. **Use `llama-server` for batch/scripted runs.** |
 | Empty `content` in chat response | Gemma 4 has thinking enabled; reasoning may occupy the token budget. Raise `max_tokens` or disable thinking in the request. |

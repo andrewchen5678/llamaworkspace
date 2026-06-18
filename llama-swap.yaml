@@ -48,7 +48,7 @@ models:
     # requests.
     # ${PORT} is assigned by llama-swap, which proxies to it.
     cmd: |
-      llama-server
+      ./llama.cpp/bin/llama-server
       -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
       --model-draft ./models/mtp-gemma-4-E4B-it.gguf
       --spec-type draft-mtp
@@ -71,7 +71,7 @@ models:
     # top-p 0.95 / min-p 0.0) for balanced, varied output. Thinking left ON.
     # Override per request for more or less randomness.
     cmd: |
-      llama-server
+      ./llama.cpp/bin/llama-server
       -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
       --model-draft ./models/mtp-gemma-4-E4B-it.gguf
       --spec-type draft-mtp
@@ -102,7 +102,7 @@ models:
     # for this is large; if you hit memory pressure, turn flash attention on
     # (-fa on) to shrink it, or drop -c.
     cmd: |
-      llama-server
+      ./llama.cpp/bin/llama-server
       -m ./models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
       --model-draft ./models/mtp-gemma-4-E4B-it.gguf
       --spec-type draft-mtp
