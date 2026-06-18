@@ -36,14 +36,20 @@ jobs:
       fail-fast: true
       matrix:
         include:
+          # rpath note: the binaries and their shared libs are shipped flat in
+          # one directory. Linux/macOS loaders don't search a binary's own dir by
+          # default, so we bake an origin-relative rpath ($ORIGIN / @loader_path)
+          # into every executable AND shared lib at link time. That makes the
+          # bundle self-locating with no LD_LIBRARY_PATH needed. Windows already
+          # searches the executable's own directory, so it needs nothing.
           - name: macos-arm64-metal
             runs-on: macos-15
             # Apple Silicon: Metal + embed the shader lib so the binary is
             # self-contained (no external default.metallib to ship).
-            cmake_flags: "-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF"
+            cmake_flags: "-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_RPC=ON -DLLAMA_CURL=OFF -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH=@loader_path"
           - name: linux-amd64-cpu
             runs-on: ubuntu-latest
-            cmake_flags: "-DGGML_RPC=ON -DLLAMA_CURL=OFF"
+            cmake_flags: "-DGGML_RPC=ON -DLLAMA_CURL=OFF -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH='$ORIGIN'"
           - name: windows-amd64-cpu
             runs-on: windows-latest
             cmake_flags: "-DGGML_RPC=ON -DLLAMA_CURL=OFF"
@@ -82,8 +88,12 @@ jobs:
           mkdir -p "$STAGE"
           BIN=llama.cpp/build/bin
           cp "$BIN/llama-server" "$BIN/rpc-server" "$STAGE/"
-          # Bundle any shared libs the binaries link against (ggml/llama .so/.dylib).
-          find "$BIN" -maxdepth 1 \( -name '*.dylib' -o -name '*.so' \) -exec cp {} "$STAGE/" \; || true
+          # Bundle every shared lib the binaries link against. -L dereferences
+          # symlinks so we materialize real files. The '*.so.*' pattern is
+          # essential: the binaries' SONAME is versioned (e.g. libggml.so.0), and
+          # matching only '*.so' would copy just the unversioned dev symlink,
+          # leaving the loader unable to find libggml.so.0 at runtime.
+          find "$BIN" -maxdepth 1 \( -name '*.dylib' -o -name '*.so' -o -name '*.so.*' \) -exec cp -L {} "$STAGE/" \; || true
           git -C llama.cpp rev-parse HEAD > "$STAGE/BUILD_COMMIT.txt"
           echo "tag=${{ inputs.tag }} platform=${{ matrix.name }}" >> "$STAGE/BUILD_COMMIT.txt"
 
