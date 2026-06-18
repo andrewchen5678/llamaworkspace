@@ -1,32 +1,33 @@
 #!/usr/bin/env bash
 #
-# download-qwen3-30b-a3b.sh
+# download-qwen3.5-35b-a3b.sh
 #
-# Downloads Qwen3-30B-A3B (MoE GGUF) for the distributed (cluster) setup.
+# Downloads Qwen3.5-35B-A3B (hybrid MoE GGUF) for the distributed (cluster) setup.
 #
 # Run this on the MAIN node only. With llama.cpp RPC the main node reads the
 # model file and streams the weights to the worker rpc-servers at load time, so
 # the workers do NOT need their own copy.
 #
-# Qwen3-30B-A3B is a Mixture-of-Experts model: ~30B total parameters, ~3B active
-# per token. There is no separate draft model / MTP drafter — it's a single GGUF.
+# Qwen3.5-35B-A3B is a hybrid (Gated DeltaNet + sparse MoE) model: ~35B total
+# parameters, ~3B active per token. Thinking is a runtime toggle in its chat
+# template — there are no separate Instruct/Thinking repos. There is no separate
+# draft model / MTP drafter (that's the 122B variant) — it's a single GGUF.
 #
 # Usage:
-#   ./download-qwen3-30b-a3b.sh [TARGET_DIR]
+#   ./download-qwen3.5-35b-a3b.sh [TARGET_DIR]
 #
 # Environment overrides:
-#   MODEL_QUANT  quant file (default: UD-Q4_K_XL ~18 GB; also: UD-Q8_K_XL, etc.)
-#   HF_REPO      source repo (default: unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF)
-#                For thinking-on, use unsloth/Qwen3-30B-A3B-Thinking-2507-GGUF.
+#   MODEL_QUANT  quant file (default: UD-Q4_K_XL ~22 GB; also: UD-Q8_K_XL, etc.)
+#   HF_REPO      source repo (default: unsloth/Qwen3.5-35B-A3B-GGUF)
 
 set -euo pipefail
 
 # ---- configuration ---------------------------------------------------------
 TARGET_DIR="${1:-./models}"
-HF_REPO="${HF_REPO:-unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF}"
+HF_REPO="${HF_REPO:-unsloth/Qwen3.5-35B-A3B-GGUF}"
 MODEL_QUANT="${MODEL_QUANT:-UD-Q4_K_XL}"
 
-MODEL_FILE="Qwen3-30B-A3B-Instruct-2507-${MODEL_QUANT}.gguf"
+MODEL_FILE="Qwen3.5-35B-A3B-${MODEL_QUANT}.gguf"
 
 HF_ENDPOINT="${HF_ENDPOINT:-https://huggingface.co}"
 
@@ -85,8 +86,8 @@ cat <<EOF
   ./llama.cpp/bin/llama-server \
     -m "${TARGET_DIR}/${MODEL_FILE}" \
     --rpc <WORKER1_IP>:50052,<WORKER2_IP>:50052 \
-    -ngl 999 -c 16384 \
-    --alias qwen3-30b-a3b-cluster \
+    -ngl 999 -c 16384 --jinja \
+    --alias qwen3.5-35b-a3b-cluster \
     --host 127.0.0.1 --port 8090
 
 Notes:

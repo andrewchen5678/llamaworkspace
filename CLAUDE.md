@@ -25,8 +25,8 @@ Metal via `llama.cpp`, with **MTP speculative decoding** for speed, fronted by
   `gemma-4-e4b-code` (low-temp for programming)
 - `serve-llama-swap.sh` — launches llama-swap (default `127.0.0.1:8090`)
 
-**B. Distributed cluster (Qwen3-30B-A3B over RPC).** Split a larger MoE model
-across a Mac + non-Mac box(es) using llama.cpp **RPC**. Deliberately **separate
+**B. Distributed cluster (Qwen3.5-35B-A3B over RPC).** Split a larger hybrid MoE
+model across a Mac + non-Mac box(es) using llama.cpp **RPC**. Deliberately **separate
 from llama-swap** (no idle unload); both listen on `8090`, so run only ONE at a
 time. All nodes must run the **identical** llama.cpp build — pinned to tag
 **`b9701`** and built for every platform via the GitHub Action.
@@ -35,7 +35,7 @@ time. All nodes must run the **identical** llama.cpp build — pinned to tag
   (+`-DGGML_RPC=ON`) for macOS arm64 (Metal), Linux amd64 CPU, Windows amd64 CPU;
   publishes the `llamacpp-rpc-b9701` Release
 - `fetch-llamacpp-rpc.sh` — downloads this node's matching pinned binary
-- `download-qwen3-30b-a3b.sh` — downloads the model (main node only)
+- `download-qwen3.5-35b-a3b.sh` — downloads the model (main node only)
 - `start-rpc-worker.sh` — runs `rpc-server` on a worker (non-Mac) node
 - `serve-qwen3-cluster.sh` — runs `llama-server` split across the cluster (main node)
 

@@ -2,7 +2,7 @@
 #
 # serve-qwen3-cluster.sh
 #
-# Launches Qwen3-30B-A3B split across the cluster via llama.cpp RPC. Run this on
+# Launches Qwen3.5-35B-A3B split across the cluster via llama.cpp RPC. Run this on
 # the MAIN node (the Mac). It starts llama-server locally and offloads part of
 # the model to the worker rpc-servers named in RPC_WORKERS.
 #
@@ -24,7 +24,7 @@
 #   PORT          listen port            (default: 8090)
 #   HOST          bind address           (default: 127.0.0.1)
 #   CTX           context size           (default: 16384)
-#   MODEL         model path             (default: ./models/Qwen3-30B-A3B-Instruct-2507-UD-Q4_K_XL.gguf)
+#   MODEL         model path             (default: ./models/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf)
 #   LLAMACPP_DIR  dir holding llama-server (default: ./llama.cpp/bin)
 
 set -euo pipefail
@@ -36,7 +36,7 @@ cd "$(dirname "$0")"
 PORT="${PORT:-8090}"
 HOST="${HOST:-127.0.0.1}"
 CTX="${CTX:-16384}"
-MODEL="${MODEL:-./models/Qwen3-30B-A3B-Instruct-2507-UD-Q4_K_XL.gguf}"
+MODEL="${MODEL:-./models/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf}"
 LLAMACPP_DIR="${LLAMACPP_DIR:-./llama.cpp/bin}"
 LLAMA_SERVER="${LLAMACPP_DIR}/llama-server"
 
@@ -60,12 +60,12 @@ fi
 
 if [[ ! -f "$MODEL" ]]; then
   err "Model not found at $MODEL"
-  err "Download it first:  ./download-qwen3-30b-a3b.sh"
+  err "Download it first:  ./download-qwen3.5-35b-a3b.sh"
   exit 1
 fi
 
-# Qwen3-30B-A3B-Instruct-2507 recommended sampling.
-SAMPLING=(--temp 0.7 --top-p 0.8 --top-k 20 --min-p 0)
+# Qwen3.5-35B-A3B recommended general sampling (thinking ON, generic use).
+SAMPLING=(--temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 1.5)
 
 # --tensor-split is optional; only pass it when TENSOR_SPLIT is set.
 SPLIT=()
@@ -77,19 +77,28 @@ fi
 log "Model       : $MODEL"
 log "Workers     : $RPC_WORKERS"
 log "Tensor split: ${TENSOR_SPLIT:-(auto)}"
-log "Listening   : http://${HOST}:${PORT}  (alias: qwen3-30b-a3b-cluster)"
+log "Listening   : http://${HOST}:${PORT}  (alias: qwen3.5-35b-a3b-cluster)"
 log "Note        : shares port ${PORT} with llama-swap — run only one at a time."
 echo
 
 # No --predict / generation cap on purpose (see CLAUDE.md): a cap silently
 # truncates; uncapped, the only ceiling is -c, which fails loudly on overflow.
+#
+# No --context-shift on purpose: Qwen3.5's Gated-DeltaNet layers carry a
+# fixed-size recurrent state that can't be partially rewound, so dropping oldest
+# tokens would corrupt it. llama.cpp leaves context-shift OFF by default; keep it.
+#
+# --jinja uses the GGUF's embedded chat template, which drives Qwen3.5's
+# thinking/non-thinking split and tool-call parsing (and enables future
+# --chat-template-kwargs toggling).
 exec "$LLAMA_SERVER" \
   -m "$MODEL" \
   --rpc "$RPC_WORKERS" \
   "${SPLIT[@]}" \
   -ngl 999 \
   -c "$CTX" \
+  --jinja \
   "${SAMPLING[@]}" \
-  --alias qwen3-30b-a3b-cluster \
+  --alias qwen3.5-35b-a3b-cluster \
   --host "$HOST" \
   --port "$PORT"

@@ -306,11 +306,11 @@ model is running. Instead open the model's own llama.cpp UI through the
 
 ---
 
-## Distributed (cluster) inference: Qwen3-30B-A3B over RPC
+## Distributed (cluster) inference: Qwen3.5-35B-A3B over RPC
 
 Everything above runs a single model on one Mac. This section is a **separate**
-setup that splits a larger Mixture-of-Experts model, **Qwen3-30B-A3B** (~30B
-total / ~3B active, ~18 GB at Q4), across **multiple machines** using llama.cpp's
+setup that splits a larger hybrid MoE model, **Qwen3.5-35B-A3B** (~35B
+total / ~3B active, ~22 GB at Q4), across **multiple machines** using llama.cpp's
 **RPC** backend — pooling the memory of a Mac plus one or more non-Mac boxes.
 
 > **Separate from llama-swap.** llama-swap (above) is the single-machine Gemma
@@ -318,7 +318,7 @@ total / ~3B active, ~18 GB at Q4), across **multiple machines** using llama.cpp'
 > idle auto-unload. **Both listen on `8090`, so run only one at a time** — stop
 > llama-swap before starting the cluster, and vice versa.
 
-> **Is a cluster even worth it?** At ~18 GB, if one machine has ≥24 GB free RAM,
+> **Is a cluster even worth it?** At ~22 GB, if one machine has ≥32 GB free RAM,
 > RPC is *slower* than running locally (activations cross the network every
 > layer). The cluster only pays off when **no single box** fits the model. If one
 > box almost fits, prefer single-machine MoE expert offload to CPU RAM instead:
@@ -359,12 +359,14 @@ confirm it's **identical on every node**.
 ### 3. Download the model (main node only)
 
 ```bash
-./download-qwen3-30b-a3b.sh ./models
+./download-qwen3.5-35b-a3b.sh ./models
 ```
 
 The main node reads the GGUF and streams weights to the workers over RPC, so
-**workers need no local model copy**. (For thinking-on, set
-`HF_REPO=unsloth/Qwen3-30B-A3B-Thinking-2507-GGUF`.)
+**workers need no local model copy**. Qwen3.5 is a single hybrid model with
+thinking **on by default** (the serve script uses the recommended thinking-mode
+sampling); to run non-thinking, add
+`--chat-template-kwargs '{"enable_thinking":false}'` to the server command.
 
 ### 4. Start the workers (each non-Mac box)
 
@@ -381,7 +383,7 @@ The main node reads the GGUF and streams weights to the workers over RPC, so
 RPC_WORKERS=192.168.1.20:50052,192.168.1.30:50052 ./serve-qwen3-cluster.sh
 ```
 
-Listens on `http://127.0.0.1:8090` with alias `qwen3-30b-a3b-cluster`. Stop it
+Listens on `http://127.0.0.1:8090` with alias `qwen3.5-35b-a3b-cluster`. Stop it
 with Ctrl-C.
 
 ### Worked example: 3 computers
@@ -404,11 +406,11 @@ which runs the equivalent of:
 
 ```bash
 ./llama.cpp/bin/llama-server \
-  -m ./models/Qwen3-30B-A3B-Instruct-2507-UD-Q4_K_XL.gguf \
+  -m ./models/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf \
   --rpc 192.168.1.20:50052,192.168.1.30:50052 \
-  -ngl 999 -c 16384 \
+  -ngl 999 -c 16384 --jinja \
   --tensor-split 32,32,16 \
-  --alias qwen3-30b-a3b-cluster \
+  --alias qwen3.5-35b-a3b-cluster \
   --host 127.0.0.1 --port 8090
 ```
 
@@ -422,7 +424,7 @@ order]` — here `32,32,16` weights the layer split by each node's free RAM. Omi
 curl -s http://127.0.0.1:8090/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen3-30b-a3b-cluster",
+    "model": "qwen3.5-35b-a3b-cluster",
     "messages": [{"role": "user", "content": "Explain MoE routing in one paragraph."}]
   }'
 ```
@@ -495,10 +497,10 @@ draft acceptance = 0.355 (116 accepted / 327 generated), mean acceptance length 
 | `download-gemma4-e4b-mtp.sh` | Downloads target model + MTP drafter (single-machine Gemma) |
 | `llama-swap.yaml` | llama-swap config: summary + generic + code models, idle auto-unload |
 | `serve-llama-swap.sh` | Launches llama-swap in front of llama-server (port 8090) |
-| `download-qwen3-30b-a3b.sh` | Downloads Qwen3-30B-A3B GGUF for the cluster (main node) |
+| `download-qwen3.5-35b-a3b.sh` | Downloads Qwen3.5-35B-A3B GGUF for the cluster (main node) |
 | `fetch-llamacpp-rpc.sh` | Downloads the pinned (b9701) RPC-enabled llama.cpp build for this node |
 | `start-rpc-worker.sh` | Starts the RPC worker (`rpc-server`) on a non-Mac node |
-| `serve-qwen3-cluster.sh` | Launches Qwen3-30B-A3B split across the cluster (main node, port 8090) |
+| `serve-qwen3-cluster.sh` | Launches Qwen3.5-35B-A3B split across the cluster (main node, port 8090) |
 | `.github/workflows/build-llamacpp-rpc.yml` | CI: builds llama.cpp b9701 (+RPC) for all node platforms |
 | `models/` | Downloaded GGUF files |
 | `README.md` | This document |
